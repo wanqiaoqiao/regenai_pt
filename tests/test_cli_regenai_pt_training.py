@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import anndata as ad
@@ -163,6 +164,11 @@ def test_cli_regenai_pt_training_and_registry_if_torch_available(tmp_path: Path)
     assert history['adversarial_weight'].iloc[-1] == pytest.approx(0.05)
     assert 'learning_rate' in history.columns
     assert history['learning_rate'].iloc[-1] == pytest.approx(0.001)
+
+    metrics_path = next(out_dir.glob('*_metrics.json'))
+    metrics = json.loads(metrics_path.read_text(encoding='utf-8'))
+    assert metrics['best_epoch'] == 1
+    assert not bool(metrics['stopped_early'])
 
     reg = ModelRegistry(registry_dir / 'models.json')
     models = reg.list_models()

@@ -374,6 +374,8 @@ class RegenAIPTForwardAdapter(ForwardTransitionModelInterface):
             'history': trainer.history,
             'epochs_trained': trainer.epochs_trained,
             'best_val_reconstruction_loss': trainer.best_val_reconstruction_loss,
+            'best_epoch': trainer.best_epoch,
+            'stopped_early': trainer.stopped_early,
         }
 
     @staticmethod
@@ -389,6 +391,8 @@ class RegenAIPTForwardAdapter(ForwardTransitionModelInterface):
         trainer.history.update(payload.get('history', {}))
         trainer.epochs_trained = int(payload.get('epochs_trained', 0))
         trainer.best_val_reconstruction_loss = payload.get('best_val_reconstruction_loss')
+        trainer.best_epoch = payload.get('best_epoch')
+        trainer.stopped_early = bool(payload.get('stopped_early', False))
         trainer.model.eval()
         return trainer
 

@@ -93,6 +93,8 @@ def test_regenai_pt_trainer_fit_encode_predict_and_save_load_if_torch_available(
     assert loaded.model is not None
     assert loaded.mappings is not None
     assert loaded.history.keys() == trainer.history.keys()
+    assert loaded.best_epoch == trainer.best_epoch
+    assert loaded.stopped_early == trainer.stopped_early
 
     preds_loaded = loaded.predict_adata(adata, treatment="A", dose=1.5)
     assert preds_loaded["x_hat"].shape == preds["x_hat"].shape
@@ -200,6 +202,64 @@ def test_scheduler_monitors_validation_reconstruction_loss_if_torch_available(
 
     assert observed_metrics == pytest.approx(
         trainer.history["val_reconstruction_loss"]
+    )
+
+
+def test_early_stopping_restores_best_validation_checkpoint_if_torch_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    torch = pytest.importorskip("torch")
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
+    from ipsc_digital_twin.models.regenai_pt_trainer import LOSS_COMPONENTS, RegenAIPTTrainer
+
+    trainer = RegenAIPTTrainer(
+        RegenAIPTConfig(
+            input_layer="raw_counts",
+            max_epochs=10,
+            early_stopping_patience=2,
+            batch_size=8,
+            n_hidden=8,
+            n_latent=4,
+            device="cpu",
+        )
+    )
+    validation_losses = iter([3.0, 1.0, 2.0, 4.0])
+    train_epoch_number = 0
+
+    def metrics(reconstruction_loss: float) -> dict[str, float]:
+        result = {component: 0.0 for component in LOSS_COMPONENTS}
+        result["reconstruction_loss"] = reconstruction_loss
+        result["total_loss"] = reconstruction_loss
+        return result
+
+    def fake_train_epoch(*args: object, **kwargs: object) -> dict[str, float]:
+        nonlocal train_epoch_number
+        train_epoch_number += 1
+        assert trainer.model is not None
+        with torch.no_grad():
+            next(trainer.model.parameters()).fill_(float(train_epoch_number))
+        return metrics(5.0)
+
+    def fake_validate_epoch(*args: object, **kwargs: object) -> dict[str, float]:
+        return metrics(next(validation_losses))
+
+    monkeypatch.setattr(trainer, "train_epoch", fake_train_epoch)
+    monkeypatch.setattr(trainer, "validate_epoch", fake_validate_epoch)
+
+    trainer.fit(_make_mock_adata(n_cells=36))
+
+    assert trainer.stopped_early
+    assert trainer.epochs_trained == 4
+    assert trainer.best_epoch == 2
+    assert trainer.best_val_reconstruction_loss == pytest.approx(1.0)
+    assert trainer.best_state_dict is not None
+    assert trainer.model is not None
+    first_parameter = next(trainer.model.parameters())
+    assert torch.all(first_parameter == 2.0)
+    first_parameter_name = next(iter(trainer.model.state_dict()))
+    assert torch.equal(
+        trainer.model.state_dict()[first_parameter_name].cpu(),
+        trainer.best_state_dict[first_parameter_name],
     )
 
 

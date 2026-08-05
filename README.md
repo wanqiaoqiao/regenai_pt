@@ -10,6 +10,7 @@ This is not a clinical system. It does not make clinical claims, and it should b
 - `v0.2.0`: Adds per-component loss logging, adversarial warm-up/ramp scheduling, and gradient clipping.
 - `v0.3.0`: Removes deprecated pre-RegenAI-PT module, class, function, CLI, and test names.
 - `v0.4.0`: Adds validation-reconstruction-driven learning-rate reduction.
+- `v0.5.0`: Adds best-checkpoint early stopping on validation reconstruction loss.
 
 ## What This Program Covers
 
@@ -202,10 +203,6 @@ Adversarial training uses a stabilization schedule by default. Its effective
 weight is zero for the first 20 epochs, increases linearly from epochs 21-40,
 and remains at `0.05` afterward. Configure this with
 `--warmup-epochs`, `--ramp-epochs`, and `--max-adversarial-weight`.
-Early stopping and best-checkpoint selection wait until the ramp is complete,
-preventing a pre-adversarial warm-up checkpoint from replacing the trained
-disentangled model.
-
 Training also clips the global parameter-gradient norm before each optimizer
 step. The default threshold is `5.0` and can be changed with
 `--gradient-clip-norm`.
@@ -215,6 +212,12 @@ Learning rate scheduling uses PyTorch `ReduceLROnPlateau`, monitoring
 after 5 plateau epochs. Configure it with `--lr-scheduler-factor` and
 `--lr-scheduler-patience`. Training history records the active
 `learning_rate` after each scheduler step.
+
+Early stopping also monitors `val_reconstruction_loss`, with a default patience
+of 15 epochs. The trainer checkpoints every new validation minimum, restores
+that checkpoint after training, and serializes the restored best model rather
+than automatically using the final epoch. Configure patience with
+`--early-stopping-patience`.
 
 This is **RegenAI-PT** in spirit and interface, but it is not presented as the official CPA implementation.
 
@@ -284,6 +287,7 @@ ipsc-twin train \
   --max-adversarial-weight 0.05 \
   --lr-scheduler-factor 0.5 \
   --lr-scheduler-patience 5 \
+  --early-stopping-patience 15 \
   --gradient-clip-norm 5.0
 ```
 

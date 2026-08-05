@@ -167,6 +167,10 @@ def _write_regenai_pt_model_card(
         validation_losses.append(f"- Final validation reconstruction loss: {_format_metric_value(history['val_reconstruction_loss'][-1])}")
     if 'best_val_reconstruction_loss' in metrics:
         validation_losses.append(f"- Best validation reconstruction loss: {_format_metric_value(metrics['best_val_reconstruction_loss'])}")
+    if 'best_epoch' in metrics:
+        validation_losses.append(f"- Restored best epoch: {metrics['best_epoch']}")
+    if 'stopped_early' in metrics:
+        validation_losses.append(f"- Stopped early: {metrics['stopped_early']}")
     if not validation_losses:
         validation_losses.append('- Validation losses: not available')
 
@@ -231,6 +235,7 @@ def _write_regenai_pt_model_card(
         "- lr_scheduler: ReduceLROnPlateau(val_reconstruction_loss)",
         f"- lr_scheduler_factor: {config_payload.get('lr_scheduler_factor', 'unknown')}",
         f"- lr_scheduler_patience: {config_payload.get('lr_scheduler_patience', 'unknown')}",
+        f"- early_stopping_patience: {config_payload.get('early_stopping_patience', 'unknown')}",
         f"- gradient_clip_norm: {config_payload.get('gradient_clip_norm', 'unknown')}",
         '',
         '## Training Run',
@@ -470,6 +475,10 @@ def train_and_register_regenai_pt(
             'round2_epochs_trained': float(adapter.round2_trainer.epochs_trained if adapter.round2_trainer is not None else 0),
             'round1_best_val_reconstruction_loss': float(adapter.round1_trainer.best_val_reconstruction_loss or 0.0) if adapter.round1_trainer is not None else 0.0,
             'round2_best_val_reconstruction_loss': float(adapter.round2_trainer.best_val_reconstruction_loss or 0.0) if adapter.round2_trainer is not None else 0.0,
+            'round1_best_epoch': float(adapter.round1_trainer.best_epoch or 0) if adapter.round1_trainer is not None else 0.0,
+            'round2_best_epoch': float(adapter.round2_trainer.best_epoch or 0) if adapter.round2_trainer is not None else 0.0,
+            'round1_stopped_early': adapter.round1_trainer.stopped_early if adapter.round1_trainer is not None else False,
+            'round2_stopped_early': adapter.round2_trainer.stopped_early if adapter.round2_trainer is not None else False,
         }
         if adapter.round1_trainer is not None:
             metrics.update(_final_loss_metrics(adapter.round1_trainer.history, prefix='round1_'))
@@ -563,6 +572,8 @@ def train_and_register_regenai_pt(
         'n_genes': float(train_adata.n_vars),
         'epochs_trained': float(trainer.epochs_trained),
         'best_val_reconstruction_loss': float(trainer.best_val_reconstruction_loss or 0.0),
+        'best_epoch': float(trainer.best_epoch or 0),
+        'stopped_early': trainer.stopped_early,
         'final_train_total_loss': float(trainer.history['train_total_loss'][-1]) if trainer.history['train_total_loss'] else 0.0,
         'final_val_total_loss': float(trainer.history['val_total_loss'][-1]) if trainer.history['val_total_loss'] else 0.0,
         'final_train_reconstruction_loss': float(trainer.history['train_reconstruction_loss'][-1]) if trainer.history['train_reconstruction_loss'] else 0.0,
@@ -638,6 +649,7 @@ def train_and_register_regenai_pt_forward_transition(
     gradient_clip_norm: float = 5.0,
     lr_scheduler_factor: float = 0.5,
     lr_scheduler_patience: int = 5,
+    early_stopping_patience: int = 15,
     dataset_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return train_and_register_regenai_pt(
@@ -658,6 +670,7 @@ def train_and_register_regenai_pt_forward_transition(
             'gradient_clip_norm': gradient_clip_norm,
             'lr_scheduler_factor': lr_scheduler_factor,
             'lr_scheduler_patience': lr_scheduler_patience,
+            'early_stopping_patience': early_stopping_patience,
         },
         treatment_mode='combined_rounds',
         random_seed=random_seed,

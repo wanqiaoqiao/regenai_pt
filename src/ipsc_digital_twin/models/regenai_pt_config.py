@@ -79,6 +79,7 @@ class RegenAIPTConfig:
     weight_decay: float = 1e-6
     lr_scheduler_factor: float = 0.5
     lr_scheduler_patience: int = 5
+    early_stopping_patience: int = 15
     gradient_clip_norm: float = 5.0
     reconstruction_loss: Literal["mse", "nb", "zinb"] = "mse"
     warmup_epochs: int = 20
@@ -116,6 +117,8 @@ class RegenAIPTConfig:
             raise ValueError("lr_scheduler_factor must be in the range (0, 1)")
         if self.lr_scheduler_patience < 0:
             raise ValueError("lr_scheduler_patience must be non-negative")
+        if self.early_stopping_patience <= 0:
+            raise ValueError("early_stopping_patience must be positive")
         if self.gradient_clip_norm <= 0.0:
             raise ValueError("gradient_clip_norm must be positive")
         if self.adversarial_weight < 0.0:

@@ -46,6 +46,7 @@ def test_regenai_pt_config_defaults_work() -> None:
     assert config.max_adversarial_weight == 0.05
     assert config.lr_scheduler_factor == 0.5
     assert config.lr_scheduler_patience == 5
+    assert config.early_stopping_patience == 15
     assert config.gradient_clip_norm == 5.0
 
 
@@ -74,6 +75,16 @@ def test_regenai_pt_config_rejects_nonpositive_gradient_clip_norm() -> None:
             assert "gradient_clip_norm must be positive" in str(exc)
         else:
             raise AssertionError("Expected invalid gradient_clip_norm to fail")
+
+
+def test_regenai_pt_config_rejects_nonpositive_early_stopping_patience() -> None:
+    for value in (0, -1):
+        try:
+            RegenAIPTConfig(early_stopping_patience=value)
+        except ValueError as exc:
+            assert "early_stopping_patience must be positive" in str(exc)
+        else:
+            raise AssertionError("Expected invalid early_stopping_patience to fail")
 
 
 def test_validate_regenai_pt_adata_missing_treatment_key_fails_clearly() -> None:

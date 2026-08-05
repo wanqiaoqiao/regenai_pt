@@ -51,8 +51,9 @@ class RegenAIPTTrainer:
         self.history["learning_rate"] = []
         self.best_val_reconstruction_loss: float | None = None
         self.best_state_dict: dict[str, torch.Tensor] | None = None
+        self.best_epoch: int | None = None
         self.epochs_trained: int = 0
-        self.early_stopping_patience: int = 5
+        self.stopped_early: bool = False
 
     @staticmethod
     def _resolve_device(device: str) -> torch.device:
@@ -132,10 +133,6 @@ class RegenAIPTTrainer:
 
         best_val = float("inf")
         patience_counter = 0
-        schedule_complete_epoch = max(
-            self.config.warmup_epochs + self.config.ramp_epochs - 1,
-            0,
-        )
         for epoch in range(self.config.max_epochs):
             active_adversarial_weight = self.adversarial_weight_for_epoch(epoch)
             train_metrics = self.train_epoch(
@@ -167,27 +164,23 @@ class RegenAIPTTrainer:
                 " ".join(f"{key}={val_metrics[key]:.6f}" for key in LOSS_COMPONENTS),
             )
             self.epochs_trained = epoch + 1
-            checkpoint_eligible = (
-                epoch >= schedule_complete_epoch
-                or epoch == self.config.max_epochs - 1
-            )
-            if checkpoint_eligible and val_recon < best_val:
+            if val_recon < best_val:
                 best_val = val_recon
                 self.best_val_reconstruction_loss = val_recon
+                self.best_epoch = epoch + 1
                 self.best_state_dict = {key: value.detach().cpu().clone() for key, value in self.model.state_dict().items()}
                 patience_counter = 0
-            elif checkpoint_eligible:
-                patience_counter += 1
-                effective_early_stopping_patience = (
-                    self.config.lr_scheduler_patience
-                    + self.early_stopping_patience
-                )
-                if patience_counter >= effective_early_stopping_patience:
-                    break
             else:
-                # Do not stop or select a checkpoint before adversarial ramp-up
-                # has completed; that would silently restore a warm-up model.
-                patience_counter = 0
+                patience_counter += 1
+                if patience_counter >= self.config.early_stopping_patience:
+                    self.stopped_early = True
+                    LOGGER.info(
+                        "Early stopping at epoch %d; restoring epoch %d with val_reconstruction_loss=%.6f",
+                        epoch + 1,
+                        self.best_epoch,
+                        self.best_val_reconstruction_loss,
+                    )
+                    break
         if self.best_state_dict is not None and self.model is not None:
             self.model.load_state_dict(self.best_state_dict)
         return self
@@ -417,6 +410,8 @@ class RegenAIPTTrainer:
             "history": self.history,
             "epochs_trained": self.epochs_trained,
             "best_val_reconstruction_loss": self.best_val_reconstruction_loss,
+            "best_epoch": self.best_epoch,
+            "stopped_early": self.stopped_early,
         }
         torch.save(payload, Path(path))
 
@@ -433,6 +428,8 @@ class RegenAIPTTrainer:
         trainer.history.update(payload.get("history", {}))
         trainer.epochs_trained = int(payload.get("epochs_trained", 0))
         trainer.best_val_reconstruction_loss = payload.get("best_val_reconstruction_loss")
+        trainer.best_epoch = payload.get("best_epoch")
+        trainer.stopped_early = bool(payload.get("stopped_early", False))
         trainer.model.eval()
         return trainer
 
