@@ -161,6 +161,8 @@ def test_cli_regenai_pt_training_and_registry_if_torch_available(tmp_path: Path)
             assert f'{split}_{component}' in history.columns
     assert 'adversarial_weight' in history.columns
     assert history['adversarial_weight'].iloc[-1] == pytest.approx(0.05)
+    assert 'learning_rate' in history.columns
+    assert history['learning_rate'].iloc[-1] == pytest.approx(0.001)
 
     reg = ModelRegistry(registry_dir / 'models.json')
     models = reg.list_models()

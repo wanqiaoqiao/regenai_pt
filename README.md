@@ -9,6 +9,7 @@ This is not a clinical system. It does not make clinical claims, and it should b
 - `v0.1.0`: RegenAI-PT production platform before training-stability upgrades.
 - `v0.2.0`: Adds per-component loss logging, adversarial warm-up/ramp scheduling, and gradient clipping.
 - `v0.3.0`: Removes deprecated pre-RegenAI-PT module, class, function, CLI, and test names.
+- `v0.4.0`: Adds validation-reconstruction-driven learning-rate reduction.
 
 ## What This Program Covers
 
@@ -209,6 +210,12 @@ Training also clips the global parameter-gradient norm before each optimizer
 step. The default threshold is `5.0` and can be changed with
 `--gradient-clip-norm`.
 
+Learning rate scheduling uses PyTorch `ReduceLROnPlateau`, monitoring
+`val_reconstruction_loss`. By default it multiplies the learning rate by `0.5`
+after 5 plateau epochs. Configure it with `--lr-scheduler-factor` and
+`--lr-scheduler-patience`. Training history records the active
+`learning_rate` after each scheduler step.
+
 This is **RegenAI-PT** in spirit and interface, but it is not presented as the official CPA implementation.
 
 ### Support for Round 1 and Round 2
@@ -275,6 +282,8 @@ ipsc-twin train \
   --warmup-epochs 20 \
   --ramp-epochs 20 \
   --max-adversarial-weight 0.05 \
+  --lr-scheduler-factor 0.5 \
+  --lr-scheduler-patience 5 \
   --gradient-clip-norm 5.0
 ```
 

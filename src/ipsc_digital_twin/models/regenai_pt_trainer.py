@@ -14,6 +14,7 @@ from .regenai_pt_data import RegenAIPTMappings, build_regenai_pt_dataloaders, re
 try:  # pragma: no cover - exercised in torch-enabled environments
     import torch
     from torch.optim import AdamW
+    from torch.optim.lr_scheduler import ReduceLROnPlateau
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
         "PyTorch is required for RegenAIPTTrainer. Install torch to use the '--transition-model regenai_pt' backend."
@@ -47,6 +48,7 @@ class RegenAIPTTrainer:
             for component in LOSS_COMPONENTS
         }
         self.history["adversarial_weight"] = []
+        self.history["learning_rate"] = []
         self.best_val_reconstruction_loss: float | None = None
         self.best_state_dict: dict[str, torch.Tensor] | None = None
         self.epochs_trained: int = 0
@@ -109,6 +111,14 @@ class RegenAIPTTrainer:
         progress = min(max(ramp_step / self.config.ramp_epochs, 0.0), 1.0)
         return float(self.config.max_adversarial_weight * progress)
 
+    def _initialize_lr_scheduler(self, optimizer: AdamW) -> ReduceLROnPlateau:
+        return ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=self.config.lr_scheduler_factor,
+            patience=self.config.lr_scheduler_patience,
+        )
+
     def fit(self, adata: ad.AnnData) -> RegenAIPTTrainer:
         report = validate_regenai_pt_adata(adata, self.config)
         if not report.is_valid:
@@ -118,6 +128,7 @@ class RegenAIPTTrainer:
         self.mappings = data_bundle.mappings
         self.model = self._initialize_model(self.mappings)
         optimizer = AdamW(self.model.parameters(), lr=self.config.learning_rate, weight_decay=self.config.weight_decay)
+        lr_scheduler = self._initialize_lr_scheduler(optimizer)
 
         best_val = float("inf")
         patience_counter = 0
@@ -139,14 +150,18 @@ class RegenAIPTTrainer:
             val_recon = val_metrics["reconstruction_loss"]
             if np.isnan(val_recon):
                 val_recon = train_metrics["reconstruction_loss"]
+            lr_scheduler.step(val_recon)
+            current_learning_rate = float(optimizer.param_groups[0]["lr"])
             for component in LOSS_COMPONENTS:
                 self.history[f"train_{component}"].append(train_metrics[component])
                 self.history[f"val_{component}"].append(val_metrics[component])
             self.history["adversarial_weight"].append(active_adversarial_weight)
+            self.history["learning_rate"].append(current_learning_rate)
             LOGGER.info(
-                "Epoch %d/%d | adversarial_weight=%.6f | train %s | val %s",
+                "Epoch %d/%d | learning_rate=%.8f | adversarial_weight=%.6f | train %s | val %s",
                 epoch + 1,
                 self.config.max_epochs,
+                current_learning_rate,
                 active_adversarial_weight,
                 " ".join(f"{key}={train_metrics[key]:.6f}" for key in LOSS_COMPONENTS),
                 " ".join(f"{key}={val_metrics[key]:.6f}" for key in LOSS_COMPONENTS),
@@ -163,7 +178,11 @@ class RegenAIPTTrainer:
                 patience_counter = 0
             elif checkpoint_eligible:
                 patience_counter += 1
-                if patience_counter >= self.early_stopping_patience:
+                effective_early_stopping_patience = (
+                    self.config.lr_scheduler_patience
+                    + self.early_stopping_patience
+                )
+                if patience_counter >= effective_early_stopping_patience:
                     break
             else:
                 # Do not stop or select a checkpoint before adversarial ramp-up

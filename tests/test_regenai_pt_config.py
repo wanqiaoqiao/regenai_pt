@@ -44,7 +44,26 @@ def test_regenai_pt_config_defaults_work() -> None:
     assert config.warmup_epochs == 20
     assert config.ramp_epochs == 20
     assert config.max_adversarial_weight == 0.05
+    assert config.lr_scheduler_factor == 0.5
+    assert config.lr_scheduler_patience == 5
     assert config.gradient_clip_norm == 5.0
+
+
+def test_regenai_pt_config_rejects_invalid_lr_scheduler_settings() -> None:
+    for factor in (0.0, 1.0, -0.5):
+        try:
+            RegenAIPTConfig(lr_scheduler_factor=factor)
+        except ValueError as exc:
+            assert "lr_scheduler_factor must be in the range (0, 1)" in str(exc)
+        else:
+            raise AssertionError("Expected invalid lr_scheduler_factor to fail")
+
+    try:
+        RegenAIPTConfig(lr_scheduler_patience=-1)
+    except ValueError as exc:
+        assert "lr_scheduler_patience must be non-negative" in str(exc)
+    else:
+        raise AssertionError("Expected invalid lr_scheduler_patience to fail")
 
 
 def test_regenai_pt_config_rejects_nonpositive_gradient_clip_norm() -> None:

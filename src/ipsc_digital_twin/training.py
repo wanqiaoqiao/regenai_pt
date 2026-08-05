@@ -228,6 +228,9 @@ def _write_regenai_pt_model_card(
         f"- embedding_l2_weight: {config_payload.get('embedding_l2_weight', 'unknown')}",
         f"- dose_regularization_weight: {config_payload.get('dose_regularization_weight', 'unknown')}",
         f"- weight_decay: {config_payload.get('weight_decay', 'unknown')}",
+        "- lr_scheduler: ReduceLROnPlateau(val_reconstruction_loss)",
+        f"- lr_scheduler_factor: {config_payload.get('lr_scheduler_factor', 'unknown')}",
+        f"- lr_scheduler_patience: {config_payload.get('lr_scheduler_patience', 'unknown')}",
         f"- gradient_clip_norm: {config_payload.get('gradient_clip_norm', 'unknown')}",
         '',
         '## Training Run',
@@ -279,6 +282,8 @@ def _final_loss_metrics(history: dict[str, list[float]], prefix: str = '') -> di
                 metrics[f'{prefix}final_{key}'] = float(values[-1])
     if history.get('adversarial_weight'):
         metrics[f'{prefix}final_adversarial_weight'] = float(history['adversarial_weight'][-1])
+    if history.get('learning_rate'):
+        metrics[f'{prefix}final_learning_rate'] = float(history['learning_rate'][-1])
     return metrics
 
 
@@ -631,6 +636,8 @@ def train_and_register_regenai_pt_forward_transition(
     ramp_epochs: int = 20,
     max_adversarial_weight: float = 0.05,
     gradient_clip_norm: float = 5.0,
+    lr_scheduler_factor: float = 0.5,
+    lr_scheduler_patience: int = 5,
     dataset_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return train_and_register_regenai_pt(
@@ -649,6 +656,8 @@ def train_and_register_regenai_pt_forward_transition(
             'ramp_epochs': ramp_epochs,
             'max_adversarial_weight': max_adversarial_weight,
             'gradient_clip_norm': gradient_clip_norm,
+            'lr_scheduler_factor': lr_scheduler_factor,
+            'lr_scheduler_patience': lr_scheduler_patience,
         },
         treatment_mode='combined_rounds',
         random_seed=random_seed,

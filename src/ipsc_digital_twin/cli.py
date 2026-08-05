@@ -81,6 +81,8 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument('--dropout', type=float, default=0.1)
     train.add_argument('--learning-rate', type=float, default=1e-3)
     train.add_argument('--weight-decay', type=float, default=1e-6)
+    train.add_argument('--lr-scheduler-factor', type=float, default=0.5)
+    train.add_argument('--lr-scheduler-patience', type=int, default=5)
     train.add_argument('--gradient-clip-norm', type=float, default=5.0)
     train.add_argument('--reconstruction-loss', choices=['mse', 'nb', 'zinb'], default='mse')
     train.add_argument('--warmup-epochs', type=int, default=20)
@@ -410,6 +412,8 @@ def main(argv: list[str] | None = None) -> int:
                         ramp_epochs=args.ramp_epochs,
                         max_adversarial_weight=args.max_adversarial_weight,
                         gradient_clip_norm=args.gradient_clip_norm,
+                        lr_scheduler_factor=args.lr_scheduler_factor,
+                        lr_scheduler_patience=args.lr_scheduler_patience,
                         dataset_metadata=ds,
                     )
                 else:
@@ -447,6 +451,8 @@ def main(argv: list[str] | None = None) -> int:
                         'learning_rate': args.learning_rate,
                         'weight_decay': args.weight_decay,
                         'gradient_clip_norm': args.gradient_clip_norm,
+                        'lr_scheduler_factor': args.lr_scheduler_factor,
+                        'lr_scheduler_patience': args.lr_scheduler_patience,
                         'reconstruction_loss': args.reconstruction_loss,
                         'warmup_epochs': args.warmup_epochs,
                         'ramp_epochs': args.ramp_epochs,

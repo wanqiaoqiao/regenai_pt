@@ -73,6 +73,8 @@ def test_regenai_pt_trainer_fit_encode_predict_and_save_load_if_torch_available(
             assert np.isfinite(values).all()
     assert len(trainer.history["adversarial_weight"]) == trainer.epochs_trained
     assert trainer.history["adversarial_weight"] == [0.0] * trainer.epochs_trained
+    assert len(trainer.history["learning_rate"]) == trainer.epochs_trained
+    assert np.isfinite(trainer.history["learning_rate"]).all()
 
     z = trainer.encode_adata(adata)
     assert z.shape == (adata.n_obs, config.n_latent)
@@ -146,6 +148,59 @@ def test_gradient_clipping_is_applied_during_training_if_torch_available(
 
     assert calls
     assert set(calls) == {2.5}
+
+
+def test_reduce_lr_on_plateau_uses_configured_defaults_if_torch_available() -> None:
+    torch = pytest.importorskip("torch")
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
+    from ipsc_digital_twin.models.regenai_pt_trainer import RegenAIPTTrainer
+
+    config = RegenAIPTConfig(learning_rate=0.01, device="cpu")
+    trainer = RegenAIPTTrainer(config)
+    parameter = torch.nn.Parameter(torch.tensor(1.0))
+    optimizer = torch.optim.AdamW([parameter], lr=config.learning_rate)
+    scheduler = trainer._initialize_lr_scheduler(optimizer)
+
+    # The first call establishes the best value; six bad epochs exceed patience=5.
+    for _ in range(7):
+        scheduler.step(1.0)
+
+    assert optimizer.param_groups[0]["lr"] == pytest.approx(0.005)
+
+
+def test_scheduler_monitors_validation_reconstruction_loss_if_torch_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    torch = pytest.importorskip("torch")
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
+    from ipsc_digital_twin.models.regenai_pt_trainer import RegenAIPTTrainer
+
+    observed_metrics: list[float] = []
+    original_step = torch.optim.lr_scheduler.ReduceLROnPlateau.step
+
+    def recording_step(scheduler: object, metrics: float, *args: object, **kwargs: object) -> object:
+        observed_metrics.append(float(metrics))
+        return original_step(scheduler, metrics, *args, **kwargs)
+
+    monkeypatch.setattr(
+        torch.optim.lr_scheduler.ReduceLROnPlateau,
+        "step",
+        recording_step,
+    )
+    trainer = RegenAIPTTrainer(
+        RegenAIPTConfig(
+            input_layer="raw_counts",
+            max_epochs=2,
+            batch_size=8,
+            n_hidden=8,
+            n_latent=4,
+            device="cpu",
+        )
+    ).fit(_make_mock_adata(n_cells=36))
+
+    assert observed_metrics == pytest.approx(
+        trainer.history["val_reconstruction_loss"]
+    )
 
 
 def test_regenai_pt_trainer_predict_uses_string_and_scalar_covariates_if_torch_available() -> None:
