@@ -127,6 +127,12 @@ def test_cli_full_cpa_like_training_and_registry_if_torch_available(tmp_path: Pa
             '8',
             '--n-latent',
             '8',
+            '--warmup-epochs',
+            '0',
+            '--ramp-epochs',
+            '1',
+            '--max-adversarial-weight',
+            '0.05',
             '--device',
             'cpu',
             '--input-layer',
@@ -140,6 +146,21 @@ def test_cli_full_cpa_like_training_and_registry_if_torch_available(tmp_path: Pa
     assert any(path.name.endswith('_training_history.csv') for path in out_dir.iterdir())
     assert any(path.name.endswith('_metrics.json') for path in out_dir.iterdir())
     assert any(path.name.endswith('_model_card.md') for path in out_dir.iterdir())
+
+    history_path = next(out_dir.glob('*_training_history.csv'))
+    history = pd.read_csv(history_path)
+    for split in ('train', 'val'):
+        for component in (
+            'reconstruction_loss',
+            'treatment_adv_loss',
+            'covariate_adv_loss',
+            'embedding_l2_loss',
+            'dose_regularization_loss',
+            'total_loss',
+        ):
+            assert f'{split}_{component}' in history.columns
+    assert 'adversarial_weight' in history.columns
+    assert history['adversarial_weight'].iloc[-1] == pytest.approx(0.05)
 
     reg = ModelRegistry(registry_dir / 'models.json')
     models = reg.list_models()

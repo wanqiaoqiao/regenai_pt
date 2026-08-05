@@ -78,6 +78,7 @@ def compute_regenai_pt_loss(
     batch: dict[str, Any],
     model: Any,
     config: RegenAIPTConfig,
+    active_adversarial_weight: float | None = None,
 ) -> dict[str, torch.Tensor]:
     reconstruction_loss = _compute_reconstruction_loss(outputs=outputs, batch=batch, config=config)
     treatment_adv_loss = _compute_treatment_adv_loss(outputs=outputs, batch=batch)
@@ -85,12 +86,20 @@ def compute_regenai_pt_loss(
     embedding_l2_loss = _compute_embedding_l2_loss(model=model, reference=reconstruction_loss)
     dose_regularization_loss = _compute_dose_regularization_loss(model=model, reference=reconstruction_loss)
 
+    adversarial_weight = (
+        config.adversarial_weight
+        if active_adversarial_weight is None
+        else float(active_adversarial_weight)
+    )
+    if adversarial_weight < 0.0:
+        raise ValueError("active_adversarial_weight must be non-negative")
+
     total_loss = reconstruction_loss
     total_loss = total_loss + (
-        config.adversarial_weight * config.perturbation_adversarial_weight * treatment_adv_loss
+        adversarial_weight * config.perturbation_adversarial_weight * treatment_adv_loss
     )
     total_loss = total_loss + (
-        config.adversarial_weight * config.covariate_adversarial_weight * covariate_adv_loss
+        adversarial_weight * config.covariate_adversarial_weight * covariate_adv_loss
     )
     total_loss = total_loss + (config.embedding_l2_weight * embedding_l2_loss)
     total_loss = total_loss + (config.dose_regularization_weight * dose_regularization_loss)

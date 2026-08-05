@@ -41,6 +41,20 @@ def test_full_cpa_like_config_defaults_work() -> None:
     assert config.input_layer == "X"
     assert config.n_latent > 0
     assert config.device == "auto"
+    assert config.warmup_epochs == 20
+    assert config.ramp_epochs == 20
+    assert config.max_adversarial_weight == 0.05
+    assert config.gradient_clip_norm == 5.0
+
+
+def test_full_cpa_like_config_rejects_nonpositive_gradient_clip_norm() -> None:
+    for value in (0.0, -1.0):
+        try:
+            FullCPALikeConfig(gradient_clip_norm=value)
+        except ValueError as exc:
+            assert "gradient_clip_norm must be positive" in str(exc)
+        else:
+            raise AssertionError("Expected invalid gradient_clip_norm to fail")
 
 
 def test_validate_full_cpa_like_adata_missing_treatment_key_fails_clearly() -> None:

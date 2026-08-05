@@ -89,7 +89,11 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument('--dropout', type=float, default=0.1)
     train.add_argument('--learning-rate', type=float, default=1e-3)
     train.add_argument('--weight-decay', type=float, default=1e-6)
+    train.add_argument('--gradient-clip-norm', type=float, default=5.0)
     train.add_argument('--reconstruction-loss', choices=['mse', 'nb', 'zinb'], default='mse')
+    train.add_argument('--warmup-epochs', type=int, default=20)
+    train.add_argument('--ramp-epochs', type=int, default=20)
+    train.add_argument('--max-adversarial-weight', type=float, default=0.05)
     train.add_argument('--treatment-mode', choices=['single_round', 'combined_rounds'], default='single_round')
     train.add_argument('--control-treatment', default='control')
 
@@ -410,6 +414,10 @@ def main(argv: list[str] | None = None) -> int:
                         batch_size=args.batch_size,
                         device=args.device,
                         input_layer=args.input_layer,
+                        warmup_epochs=args.warmup_epochs,
+                        ramp_epochs=args.ramp_epochs,
+                        max_adversarial_weight=args.max_adversarial_weight,
+                        gradient_clip_norm=args.gradient_clip_norm,
                         dataset_metadata=ds,
                     )
                 else:
@@ -446,7 +454,11 @@ def main(argv: list[str] | None = None) -> int:
                         'batch_size': args.batch_size,
                         'learning_rate': args.learning_rate,
                         'weight_decay': args.weight_decay,
+                        'gradient_clip_norm': args.gradient_clip_norm,
                         'reconstruction_loss': args.reconstruction_loss,
+                        'warmup_epochs': args.warmup_epochs,
+                        'ramp_epochs': args.ramp_epochs,
+                        'max_adversarial_weight': args.max_adversarial_weight,
                         'random_seed': args.random_seed,
                         'device': args.device,
                         'control_treatment': args.control_treatment,

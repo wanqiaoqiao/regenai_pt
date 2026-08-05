@@ -58,8 +58,21 @@ def test_full_cpa_like_trainer_fit_encode_predict_and_save_load_if_torch_availab
     assert trainer.model is not None
     assert trainer.mappings is not None
     assert trainer.epochs_trained >= 1
-    assert len(trainer.history["train_total_loss"]) >= 1
-    assert len(trainer.history["val_reconstruction_loss"]) >= 1
+    loss_components = (
+        "reconstruction_loss",
+        "treatment_adv_loss",
+        "covariate_adv_loss",
+        "embedding_l2_loss",
+        "dose_regularization_loss",
+        "total_loss",
+    )
+    for split in ("train", "val"):
+        for component in loss_components:
+            values = trainer.history[f"{split}_{component}"]
+            assert len(values) == trainer.epochs_trained
+            assert np.isfinite(values).all()
+    assert len(trainer.history["adversarial_weight"]) == trainer.epochs_trained
+    assert trainer.history["adversarial_weight"] == [0.0] * trainer.epochs_trained
 
     z = trainer.encode_adata(adata)
     assert z.shape == (adata.n_obs, config.n_latent)
@@ -81,6 +94,60 @@ def test_full_cpa_like_trainer_fit_encode_predict_and_save_load_if_torch_availab
 
     preds_loaded = loaded.predict_adata(adata, treatment="A", dose=1.5)
     assert preds_loaded["x_hat"].shape == preds["x_hat"].shape
+
+
+def test_adversarial_warmup_and_ramp_schedule_if_torch_available() -> None:
+    pytest.importorskip("torch")
+    from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
+    from ipsc_digital_twin.models.full_cpa_like_trainer import FullCPALikeTrainer
+
+    trainer = FullCPALikeTrainer(
+        FullCPALikeConfig(
+            warmup_epochs=2,
+            ramp_epochs=2,
+            max_adversarial_weight=0.05,
+            device="cpu",
+        )
+    )
+
+    assert trainer.adversarial_weight_for_epoch(0) == 0.0
+    assert trainer.adversarial_weight_for_epoch(1) == 0.0
+    assert trainer.adversarial_weight_for_epoch(2) == pytest.approx(0.025)
+    assert trainer.adversarial_weight_for_epoch(3) == pytest.approx(0.05)
+    assert trainer.adversarial_weight_for_epoch(4) == pytest.approx(0.05)
+
+
+def test_gradient_clipping_is_applied_during_training_if_torch_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    torch = pytest.importorskip("torch")
+    from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
+    from ipsc_digital_twin.models.full_cpa_like_trainer import FullCPALikeTrainer
+
+    calls: list[float] = []
+    original_clip = torch.nn.utils.clip_grad_norm_
+
+    def recording_clip(parameters: object, max_norm: float, *args: object, **kwargs: object) -> object:
+        calls.append(float(max_norm))
+        return original_clip(parameters, max_norm, *args, **kwargs)
+
+    monkeypatch.setattr(torch.nn.utils, "clip_grad_norm_", recording_clip)
+    config = FullCPALikeConfig(
+        input_layer="raw_counts",
+        gradient_clip_norm=2.5,
+        max_epochs=1,
+        batch_size=8,
+        n_hidden=8,
+        n_latent=4,
+        device="cpu",
+    )
+
+    FullCPALikeTrainer(config).fit(_make_mock_adata(n_cells=18))
+
+    assert calls
+    assert set(calls) == {2.5}
+
+
 def test_full_cpa_like_trainer_predict_uses_string_and_scalar_covariates_if_torch_available() -> None:
     pytest.importorskip("torch")
     from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig

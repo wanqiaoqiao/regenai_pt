@@ -4,6 +4,11 @@ This repository is the production-oriented development layer for the iPSC two-st
 
 This is not a clinical system. It does not make clinical claims, and it should be treated as a scientific decision-support and experimental planning platform.
 
+## Release History
+
+- `v0.1.0`: RegenAI-PT production platform before training-stability upgrades.
+- `v0.2.0`: Adds per-component loss logging, adversarial warm-up/ramp scheduling, and gradient clipping.
+
 ## What This Program Covers
 
 The Production program currently supports:
@@ -191,6 +196,18 @@ The RegenAI-PT backend uses the following components:
 - **Adversarial classifiers**: treatment and covariate probes attached to `z_basal` through gradient reversal
 - **Combined loss**: reconstruction loss + adversarial losses + embedding regularization + dose regularization
 
+Adversarial training uses a stabilization schedule by default. Its effective
+weight is zero for the first 20 epochs, increases linearly from epochs 21-40,
+and remains at `0.05` afterward. Configure this with
+`--warmup-epochs`, `--ramp-epochs`, and `--max-adversarial-weight`.
+Early stopping and best-checkpoint selection wait until the ramp is complete,
+preventing a pre-adversarial warm-up checkpoint from replacing the trained
+disentangled model.
+
+Training also clips the global parameter-gradient norm before each optimizer
+step. The default threshold is `5.0` and can be changed with
+`--gradient-clip-norm`.
+
 This is **RegenAI-PT** in spirit and interface, but it is not presented as the official CPA implementation.
 
 ### Support for Round 1 and Round 2
@@ -253,7 +270,11 @@ ipsc-twin train \
   --covariate-keys iPSC_line,batch,round,time_point \
   --max-epochs 50 \
   --batch-size 256 \
-  --n-latent 64
+  --n-latent 64 \
+  --warmup-epochs 20 \
+  --ramp-epochs 20 \
+  --max-adversarial-weight 0.05 \
+  --gradient-clip-norm 5.0
 ```
 
 #### Train round 1 explicitly

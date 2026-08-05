@@ -386,7 +386,7 @@ class RegenAIPTForwardAdapter(ForwardTransitionModelInterface):
         trainer.mappings = mappings
         trainer.model = trainer._initialize_model(mappings)
         trainer.model.load_state_dict(payload['model_state_dict'])
-        trainer.history = payload.get('history', trainer.history)
+        trainer.history.update(payload.get('history', {}))
         trainer.epochs_trained = int(payload.get('epochs_trained', 0))
         trainer.best_val_reconstruction_loss = payload.get('best_val_reconstruction_loss')
         trainer.model.eval()

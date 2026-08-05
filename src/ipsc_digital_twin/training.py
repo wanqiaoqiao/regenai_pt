@@ -220,12 +220,15 @@ def _write_regenai_pt_model_card(
         '',
         '## Loss Weights',
         f"- reconstruction_loss: {config_payload.get('reconstruction_loss', 'unknown')}",
-        f"- adversarial_weight: {config_payload.get('adversarial_weight', 'unknown')}",
+        f"- adversarial warm-up epochs: {config_payload.get('warmup_epochs', 'unknown')}",
+        f"- adversarial ramp epochs: {config_payload.get('ramp_epochs', 'unknown')}",
+        f"- maximum adversarial weight: {config_payload.get('max_adversarial_weight', 'unknown')}",
         f"- covariate_adversarial_weight: {config_payload.get('covariate_adversarial_weight', 'unknown')}",
         f"- perturbation_adversarial_weight: {config_payload.get('perturbation_adversarial_weight', 'unknown')}",
         f"- embedding_l2_weight: {config_payload.get('embedding_l2_weight', 'unknown')}",
         f"- dose_regularization_weight: {config_payload.get('dose_regularization_weight', 'unknown')}",
         f"- weight_decay: {config_payload.get('weight_decay', 'unknown')}",
+        f"- gradient_clip_norm: {config_payload.get('gradient_clip_norm', 'unknown')}",
         '',
         '## Training Run',
         f"- Training epochs: {metrics.get('epochs_trained', metrics.get('round1_epochs_trained', 'unknown'))}",
@@ -257,6 +260,27 @@ def _history_rows(history: dict[str, list[float]], phase: str) -> list[dict[str,
             row[key] = values[epoch_idx] if epoch_idx < len(values) else None
         rows.append(row)
     return rows
+
+
+def _final_loss_metrics(history: dict[str, list[float]], prefix: str = '') -> dict[str, float]:
+    metrics: dict[str, float] = {}
+    for split in ('train', 'val'):
+        for component in (
+            'reconstruction_loss',
+            'treatment_adv_loss',
+            'covariate_adv_loss',
+            'embedding_l2_loss',
+            'dose_regularization_loss',
+            'total_loss',
+        ):
+            key = f'{split}_{component}'
+            values = history.get(key, [])
+            if values:
+                metrics[f'{prefix}final_{key}'] = float(values[-1])
+    if history.get('adversarial_weight'):
+        metrics[f'{prefix}final_adversarial_weight'] = float(history['adversarial_weight'][-1])
+    return metrics
+
 
 
 def _save_regenai_pt_supporting_artifacts(
@@ -442,6 +466,10 @@ def train_and_register_regenai_pt(
             'round1_best_val_reconstruction_loss': float(adapter.round1_trainer.best_val_reconstruction_loss or 0.0) if adapter.round1_trainer is not None else 0.0,
             'round2_best_val_reconstruction_loss': float(adapter.round2_trainer.best_val_reconstruction_loss or 0.0) if adapter.round2_trainer is not None else 0.0,
         }
+        if adapter.round1_trainer is not None:
+            metrics.update(_final_loss_metrics(adapter.round1_trainer.history, prefix='round1_'))
+        if adapter.round2_trainer is not None:
+            metrics.update(_final_loss_metrics(adapter.round2_trainer.history, prefix='round2_'))
         extra_paths = _save_regenai_pt_supporting_artifacts(
             output_dir=out_dir,
             config_payload={
@@ -536,6 +564,7 @@ def train_and_register_regenai_pt(
         'final_val_reconstruction_loss': float(trainer.history['val_reconstruction_loss'][-1]) if trainer.history['val_reconstruction_loss'] else 0.0,
         'n_treatments': float(len(trainer.mappings.treatment_to_id) if trainer.mappings is not None else 0),
     }
+    metrics.update(_final_loss_metrics(trainer.history))
     extra_paths = _save_regenai_pt_supporting_artifacts(
         output_dir=out_dir,
         config_payload={
@@ -598,6 +627,10 @@ def train_and_register_regenai_pt_forward_transition(
     batch_size: int = 32,
     device: str = 'auto',
     input_layer: str = 'raw_counts',
+    warmup_epochs: int = 20,
+    ramp_epochs: int = 20,
+    max_adversarial_weight: float = 0.05,
+    gradient_clip_norm: float = 5.0,
     dataset_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return train_and_register_regenai_pt(
@@ -612,6 +645,10 @@ def train_and_register_regenai_pt_forward_transition(
             'batch_size': batch_size,
             'random_seed': random_seed,
             'device': device,
+            'warmup_epochs': warmup_epochs,
+            'ramp_epochs': ramp_epochs,
+            'max_adversarial_weight': max_adversarial_weight,
+            'gradient_clip_norm': gradient_clip_norm,
         },
         treatment_mode='combined_rounds',
         random_seed=random_seed,

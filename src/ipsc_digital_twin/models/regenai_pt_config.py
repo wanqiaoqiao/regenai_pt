@@ -77,7 +77,12 @@ class RegenAIPTConfig:
     batch_size: int = 256
     learning_rate: float = 1e-3
     weight_decay: float = 1e-6
+    gradient_clip_norm: float = 5.0
     reconstruction_loss: Literal["mse", "nb", "zinb"] = "mse"
+    warmup_epochs: int = 20
+    ramp_epochs: int = 20
+    max_adversarial_weight: float = 0.05
+    # Retained for loading older artifacts and direct loss-function calls.
     adversarial_weight: float = 1.0
     covariate_adversarial_weight: float = 0.5
     perturbation_adversarial_weight: float = 0.5
@@ -109,8 +114,16 @@ class RegenAIPTConfig:
             raise ValueError("learning_rate must be positive")
         if self.weight_decay < 0.0:
             raise ValueError("weight_decay must be non-negative")
+        if self.gradient_clip_norm <= 0.0:
+            raise ValueError("gradient_clip_norm must be positive")
         if self.adversarial_weight < 0.0:
             raise ValueError("adversarial_weight must be non-negative")
+        if self.warmup_epochs < 0:
+            raise ValueError("warmup_epochs must be non-negative")
+        if self.ramp_epochs < 0:
+            raise ValueError("ramp_epochs must be non-negative")
+        if self.max_adversarial_weight < 0.0:
+            raise ValueError("max_adversarial_weight must be non-negative")
         if self.covariate_adversarial_weight < 0.0:
             raise ValueError("covariate_adversarial_weight must be non-negative")
         if self.perturbation_adversarial_weight < 0.0:

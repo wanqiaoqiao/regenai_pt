@@ -131,3 +131,36 @@ def test_losses_remain_finite_without_covariates_if_torch_available() -> None:
     assert torch.isfinite(loss_dict["covariate_adv_loss"])
     assert torch.isfinite(loss_dict["embedding_l2_loss"])
     assert torch.isfinite(loss_dict["dose_regularization_loss"])
+
+
+def test_zero_active_adversarial_weight_excludes_adversarial_losses_if_torch_available() -> None:
+    torch = pytest.importorskip("torch")
+    from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
+    from ipsc_digital_twin.models.full_cpa_like_losses import compute_full_cpa_like_loss
+    from ipsc_digital_twin.models.full_cpa_like_model import FullCPALikeNet
+
+    model = FullCPALikeNet(input_dim=5, n_treatments=2, n_latent=3, n_hidden=6)
+    config = FullCPALikeConfig(
+        embedding_l2_weight=0.0,
+        dose_regularization_weight=0.0,
+    )
+    batch = {
+        "x": torch.randn(3, 5),
+        "treatment_id": torch.tensor([0, 1, 1]),
+        "dose_value": torch.tensor([0.0, 1.0, 2.0]),
+        "covariate_ids": {},
+    }
+    outputs = model(
+        x=batch["x"],
+        treatment_id=batch["treatment_id"],
+        dose=batch["dose_value"],
+    )
+    losses = compute_full_cpa_like_loss(
+        outputs=outputs,
+        batch=batch,
+        model=model,
+        config=config,
+        active_adversarial_weight=0.0,
+    )
+
+    assert torch.allclose(losses["total_loss"], losses["reconstruction_loss"])

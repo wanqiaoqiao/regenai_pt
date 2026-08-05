@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, cast
@@ -21,6 +22,17 @@ except ImportError as exc:  # pragma: no cover
 from .regenai_pt_losses import compute_regenai_pt_loss
 from .regenai_pt_model import RegenAIPTNet
 
+LOGGER = logging.getLogger(__name__)
+
+LOSS_COMPONENTS = (
+    "reconstruction_loss",
+    "treatment_adv_loss",
+    "covariate_adv_loss",
+    "embedding_l2_loss",
+    "dose_regularization_loss",
+    "total_loss",
+)
+
 
 class RegenAIPTTrainer:
     def __init__(self, config: RegenAIPTConfig) -> None:
@@ -30,11 +42,11 @@ class RegenAIPTTrainer:
         self.model: RegenAIPTNet | None = None
         self.mappings: RegenAIPTMappings | None = None
         self.history: dict[str, list[float]] = {
-            "train_total_loss": [],
-            "train_reconstruction_loss": [],
-            "val_total_loss": [],
-            "val_reconstruction_loss": [],
+            f"{split}_{component}": []
+            for split in ("train", "val")
+            for component in LOSS_COMPONENTS
         }
+        self.history["adversarial_weight"] = []
         self.best_val_reconstruction_loss: float | None = None
         self.best_state_dict: dict[str, torch.Tensor] | None = None
         self.epochs_trained: int = 0
@@ -63,7 +75,8 @@ class RegenAIPTTrainer:
             n_hidden=self.config.n_hidden,
             n_layers=self.config.n_layers,
             dropout=self.config.dropout,
-            adversarial_lambda=self.config.adversarial_weight,
+            # The scheduled loss coefficient applies adversarial strength once.
+            adversarial_lambda=1.0,
             max_components=mappings.max_components,
             use_component_interactions=self.config.use_component_interactions,
         )
@@ -84,6 +97,18 @@ class RegenAIPTTrainer:
             "sample_weight": batch["sample_weight"].to(self.device),
         }
 
+    def adversarial_weight_for_epoch(self, epoch_index: int) -> float:
+        """Return the scheduled adversarial coefficient for a zero-based epoch."""
+        if epoch_index < 0:
+            raise ValueError("epoch_index must be non-negative")
+        if epoch_index < self.config.warmup_epochs:
+            return 0.0
+        if self.config.ramp_epochs == 0:
+            return float(self.config.max_adversarial_weight)
+        ramp_step = epoch_index - self.config.warmup_epochs + 1
+        progress = min(max(ramp_step / self.config.ramp_epochs, 0.0), 1.0)
+        return float(self.config.max_adversarial_weight * progress)
+
     def fit(self, adata: ad.AnnData) -> RegenAIPTTrainer:
         report = validate_regenai_pt_adata(adata, self.config)
         if not report.is_valid:
@@ -96,35 +121,68 @@ class RegenAIPTTrainer:
 
         best_val = float("inf")
         patience_counter = 0
+        schedule_complete_epoch = max(
+            self.config.warmup_epochs + self.config.ramp_epochs - 1,
+            0,
+        )
         for epoch in range(self.config.max_epochs):
-            train_metrics = self.train_epoch(data_bundle.train_loader, optimizer)
-            val_metrics = self.validate_epoch(data_bundle.val_loader)
+            active_adversarial_weight = self.adversarial_weight_for_epoch(epoch)
+            train_metrics = self.train_epoch(
+                data_bundle.train_loader,
+                optimizer,
+                active_adversarial_weight=active_adversarial_weight,
+            )
+            val_metrics = self.validate_epoch(
+                data_bundle.val_loader,
+                active_adversarial_weight=active_adversarial_weight,
+            )
             val_recon = val_metrics["reconstruction_loss"]
             if np.isnan(val_recon):
                 val_recon = train_metrics["reconstruction_loss"]
-            self.history["train_total_loss"].append(train_metrics["total_loss"])
-            self.history["train_reconstruction_loss"].append(train_metrics["reconstruction_loss"])
-            self.history["val_total_loss"].append(val_metrics["total_loss"])
-            self.history["val_reconstruction_loss"].append(val_metrics["reconstruction_loss"])
+            for component in LOSS_COMPONENTS:
+                self.history[f"train_{component}"].append(train_metrics[component])
+                self.history[f"val_{component}"].append(val_metrics[component])
+            self.history["adversarial_weight"].append(active_adversarial_weight)
+            LOGGER.info(
+                "Epoch %d/%d | adversarial_weight=%.6f | train %s | val %s",
+                epoch + 1,
+                self.config.max_epochs,
+                active_adversarial_weight,
+                " ".join(f"{key}={train_metrics[key]:.6f}" for key in LOSS_COMPONENTS),
+                " ".join(f"{key}={val_metrics[key]:.6f}" for key in LOSS_COMPONENTS),
+            )
             self.epochs_trained = epoch + 1
-            if val_recon < best_val:
+            checkpoint_eligible = (
+                epoch >= schedule_complete_epoch
+                or epoch == self.config.max_epochs - 1
+            )
+            if checkpoint_eligible and val_recon < best_val:
                 best_val = val_recon
                 self.best_val_reconstruction_loss = val_recon
                 self.best_state_dict = {key: value.detach().cpu().clone() for key, value in self.model.state_dict().items()}
                 patience_counter = 0
-            else:
+            elif checkpoint_eligible:
                 patience_counter += 1
                 if patience_counter >= self.early_stopping_patience:
                     break
+            else:
+                # Do not stop or select a checkpoint before adversarial ramp-up
+                # has completed; that would silently restore a warm-up model.
+                patience_counter = 0
         if self.best_state_dict is not None and self.model is not None:
             self.model.load_state_dict(self.best_state_dict)
         return self
 
-    def train_epoch(self, train_loader: Any, optimizer: AdamW) -> dict[str, float]:
+    def train_epoch(
+        self,
+        train_loader: Any,
+        optimizer: AdamW,
+        active_adversarial_weight: float | None = None,
+    ) -> dict[str, float]:
         if self.model is None:
             raise RuntimeError("Model has not been initialized")
         self.model.train()
-        accum = {key: 0.0 for key in ["total_loss", "reconstruction_loss", "treatment_adv_loss", "covariate_adv_loss", "embedding_l2_loss", "dose_regularization_loss"]}
+        accum = {key: 0.0 for key in LOSS_COMPONENTS}
         n_batches = 0
         for batch in train_loader:
             batch = self._move_batch_to_device(batch)
@@ -138,8 +196,18 @@ class RegenAIPTTrainer:
                 component_doses=batch["component_doses"],
                 component_mask=batch["component_mask"],
             )
-            loss_dict = compute_regenai_pt_loss(outputs=outputs, batch=batch, model=self.model, config=self.config)
+            loss_dict = compute_regenai_pt_loss(
+                outputs=outputs,
+                batch=batch,
+                model=self.model,
+                config=self.config,
+                active_adversarial_weight=active_adversarial_weight,
+            )
             loss_dict["total_loss"].backward()
+            torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(),
+                max_norm=self.config.gradient_clip_norm,
+            )
             optimizer.step()
             for key in accum:
                 accum[key] += float(loss_dict[key].detach().cpu().item())
@@ -149,11 +217,15 @@ class RegenAIPTTrainer:
         return {key: value / n_batches for key, value in accum.items()}
 
     @torch.no_grad()
-    def validate_epoch(self, val_loader: Any) -> dict[str, float]:
+    def validate_epoch(
+        self,
+        val_loader: Any,
+        active_adversarial_weight: float | None = None,
+    ) -> dict[str, float]:
         if self.model is None:
             raise RuntimeError("Model has not been initialized")
         self.model.eval()
-        accum = {key: 0.0 for key in ["total_loss", "reconstruction_loss", "treatment_adv_loss", "covariate_adv_loss", "embedding_l2_loss", "dose_regularization_loss"]}
+        accum = {key: 0.0 for key in LOSS_COMPONENTS}
         n_batches = 0
         for batch in val_loader:
             batch = self._move_batch_to_device(batch)
@@ -166,7 +238,13 @@ class RegenAIPTTrainer:
                 component_doses=batch["component_doses"],
                 component_mask=batch["component_mask"],
             )
-            loss_dict = compute_regenai_pt_loss(outputs=outputs, batch=batch, model=self.model, config=self.config)
+            loss_dict = compute_regenai_pt_loss(
+                outputs=outputs,
+                batch=batch,
+                model=self.model,
+                config=self.config,
+                active_adversarial_weight=active_adversarial_weight,
+            )
             for key in accum:
                 accum[key] += float(loss_dict[key].detach().cpu().item())
             n_batches += 1
@@ -333,10 +411,10 @@ class RegenAIPTTrainer:
         trainer.mappings = mappings
         trainer.model = trainer._initialize_model(mappings)
         trainer.model.load_state_dict(payload["model_state_dict"])
-        trainer.history = payload.get("history", trainer.history)
+        trainer.history.update(payload.get("history", {}))
         trainer.epochs_trained = int(payload.get("epochs_trained", 0))
         trainer.best_val_reconstruction_loss = payload.get("best_val_reconstruction_loss")
         trainer.model.eval()
         return trainer
 
-__all__ = ["RegenAIPTTrainer"]
+__all__ = ["LOSS_COMPONENTS", "RegenAIPTTrainer"]
