@@ -1,0 +1,48 @@
+treatments:
+  - treatment_id: T001
+    treatment_name: CHIR99021
+    treatment_type: small_molecule
+    pathway: WNT
+    molecular_target: GSK3B
+    dose: 3.0
+    dose_unit: uM
+    duration_hours: 24
+    vendor: Selleck
+    catalog_number: S2924
+    grade: RUO
+    mechanism_notes: Activates canonical WNT signaling via GSK3 inhibition.
+    safety_notes: Monitor stress at high doses.
+    cost_estimate: 120.0
+    active: true
+
+  - treatment_id: T002
+    treatment_name: Activin A
+    treatment_type: cytokine
+    pathway: TGF_beta
+    molecular_target: ACVR1B
+    dose: 100.0
+    dose_unit: ng_per_mL
+    duration_hours: 48
+    vendor: PeproTech
+    catalog_number: 120-14E
+    grade: RUO
+    mechanism_notes: Promotes definitive endoderm induction.
+    safety_notes: Batch potency variability possible.
+    cost_estimate: 280.0
+    active: true
+
+  - treatment_id: T003
+    treatment_name: BMP4
+    treatment_type: protein
+    pathway: BMP
+    molecular_target: BMPR1A
+    dose: 10.0
+    dose_unit: ng_per_mL
+    duration_hours: 24
+    vendor: RnD
+    catalog_number: 314-BP
+    grade: unknown
+    mechanism_notes: Supports mesendoderm transition in context-dependent programs.
+    safety_notes: Evaluate off-target lineage drift.
+    cost_estimate: 190.0
+    active: false

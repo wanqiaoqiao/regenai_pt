@@ -1,0 +1,29 @@
+# Python environments and caches
+.venv/
+.venv.*/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Packaging and build outputs
+build/
+dist/
+*.egg-info/
+
+# Local scientific data and generated model artifacts
+data/
+sample_data/
+outputs/
+models/releases/
+state/
+*.h5ad
+*.pt
+*.npy
+*.npz
+
+# Local configuration and operating-system files
+.env
+.env.*
+.DS_Store
