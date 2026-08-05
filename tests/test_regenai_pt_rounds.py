@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
-from ipsc_digital_twin.models.full_cpa_like_data import prepare_round_specific_adata
+from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
+from ipsc_digital_twin.models.regenai_pt_data import prepare_round_specific_adata
 
 
 def _make_round_adata(n_per_group: int = 6) -> ad.AnnData:
@@ -89,31 +89,31 @@ def test_prepare_round2_adata_works_and_keeps_round1_context() -> None:
 
 def test_round2_dataloaders_include_round1_treatment_as_covariate_if_torch_available() -> None:
     pytest.importorskip("torch")
-    from ipsc_digital_twin.models.full_cpa_like_data import build_full_cpa_like_dataloaders
+    from ipsc_digital_twin.models.regenai_pt_data import build_regenai_pt_dataloaders
 
     adata = _make_round_adata()
     round2 = prepare_round_specific_adata(adata, round_number=2)
-    config = FullCPALikeConfig(
+    config = RegenAIPTConfig(
         input_layer="raw_counts",
         covariate_keys=("replicate", "sequencing_run"),
         max_epochs=1,
         batch_size=8,
         device="cpu",
     )
-    bundle = build_full_cpa_like_dataloaders(round2, config)
+    bundle = build_regenai_pt_dataloaders(round2, config)
     assert "round1_treatment" in bundle.mappings.covariate_to_id
 
 
 def test_simulate_two_round_sequence_returns_prediction_and_order_matters_if_torch_available() -> None:
     pytest.importorskip("torch")
-    from ipsc_digital_twin.models.full_cpa_like_trainer import FullCPALikeTrainer
+    from ipsc_digital_twin.models.regenai_pt_trainer import RegenAIPTTrainer
     from ipsc_digital_twin.models.simulation import simulate_two_round_sequence
 
     adata = _make_round_adata()
     round1 = prepare_round_specific_adata(adata, round_number=1)
     round2 = prepare_round_specific_adata(adata, round_number=2)
 
-    config1 = FullCPALikeConfig(
+    config1 = RegenAIPTConfig(
         input_layer="raw_counts",
         covariate_keys=("replicate", "sequencing_run"),
         n_latent=4,
@@ -124,7 +124,7 @@ def test_simulate_two_round_sequence_returns_prediction_and_order_matters_if_tor
         batch_size=8,
         device="cpu",
     )
-    config2 = FullCPALikeConfig(
+    config2 = RegenAIPTConfig(
         input_layer="raw_counts",
         covariate_keys=("replicate", "sequencing_run"),
         n_latent=4,
@@ -136,8 +136,8 @@ def test_simulate_two_round_sequence_returns_prediction_and_order_matters_if_tor
         device="cpu",
     )
 
-    trainer1 = FullCPALikeTrainer(config1).fit(round1)
-    trainer2 = FullCPALikeTrainer(config2).fit(round2)
+    trainer1 = RegenAIPTTrainer(config1).fit(round1)
+    trainer2 = RegenAIPTTrainer(config2).fit(round2)
 
     current = adata[adata.obs["time_point"].astype(str) == "intermediate"].copy()
     seq_ab = simulate_two_round_sequence({"round1": trainer1, "round2": trainer2}, current, "A", "B")

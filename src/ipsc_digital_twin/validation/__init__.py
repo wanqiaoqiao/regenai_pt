@@ -20,8 +20,6 @@ from .splits import (
     holdout_by_treatment_sequence,
 )
 
-write_full_cpa_like_validation_report = write_regenai_pt_validation_report
-
 __all__ = [
     'compute_direction_accuracy',
     'compute_rmse',

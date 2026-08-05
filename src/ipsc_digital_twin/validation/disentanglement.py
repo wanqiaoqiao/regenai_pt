@@ -282,7 +282,3 @@ def write_regenai_pt_validation_report(
         'markdown': str(markdown_path),
         'csv': str(csv_path),
     }
-
-
-# Compatibility alias for report callers written before the RegenAI-PT rename.
-write_full_cpa_like_validation_report = write_regenai_pt_validation_report

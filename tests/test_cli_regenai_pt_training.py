@@ -87,7 +87,7 @@ def _make_round_trainable_adata(path: Path, n_per_group: int = 6) -> None:
     adata.write_h5ad(path)
 
 
-def test_cli_full_cpa_like_training_and_registry_if_torch_available(tmp_path: Path) -> None:
+def test_cli_regenai_pt_training_and_registry_if_torch_available(tmp_path: Path) -> None:
     pytest.importorskip('torch')
     registry_dir = tmp_path / 'state'
     registry_dir.mkdir(parents=True, exist_ok=True)
@@ -98,12 +98,12 @@ def test_cli_full_cpa_like_training_and_registry_if_torch_available(tmp_path: Pa
     ds_reg = DatasetRegistry(registry_dir / 'datasets.json')
     ds_record = ds_reg.register_dataset(
         anndata_path=ds_path,
-        experiment_id='exp_cpa',
+        experiment_id='exp_regenai_pt',
         preprocessing_version='p1',
         schema_version='s1',
     )
 
-    out_dir = tmp_path / 'outputs' / 'full_cpa_like_training'
+    out_dir = tmp_path / 'outputs' / 'regenai_pt_training'
     rc = main(
         [
             'train',
@@ -112,7 +112,7 @@ def test_cli_full_cpa_like_training_and_registry_if_torch_available(tmp_path: Pa
             '--dataset-id',
             ds_record['dataset_id'],
             '--model-type',
-            'full_cpa_like',
+            'regenai_pt',
             '--output-dir',
             str(out_dir),
             '--treatment-key',
@@ -167,7 +167,7 @@ def test_cli_full_cpa_like_training_and_registry_if_torch_available(tmp_path: Pa
     assert models[-1]['model_type'] == 'regenai_pt'
 
 
-def test_cli_full_cpa_like_combined_training_if_torch_available(tmp_path: Path) -> None:
+def test_cli_regenai_pt_combined_training_if_torch_available(tmp_path: Path) -> None:
     pytest.importorskip('torch')
     registry_dir = tmp_path / 'state_combined'
     registry_dir.mkdir(parents=True, exist_ok=True)
@@ -183,7 +183,7 @@ def test_cli_full_cpa_like_combined_training_if_torch_available(tmp_path: Path) 
         schema_version='s1',
     )
 
-    out_dir = tmp_path / 'outputs' / 'full_cpa_like_combined'
+    out_dir = tmp_path / 'outputs' / 'regenai_pt_combined'
     rc = main(
         [
             'train',
@@ -192,7 +192,7 @@ def test_cli_full_cpa_like_combined_training_if_torch_available(tmp_path: Path) 
             '--dataset-id',
             ds_record['dataset_id'],
             '--model-type',
-            'full_cpa_like',
+            'regenai_pt',
             '--output-dir',
             str(out_dir),
             '--treatment-mode',

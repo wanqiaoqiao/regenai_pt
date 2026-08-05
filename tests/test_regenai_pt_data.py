@@ -6,11 +6,11 @@ import pandas as pd
 import pytest
 
 from ipsc_digital_twin.models import regenai_pt_data as data_mod
-from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
-from ipsc_digital_twin.models.full_cpa_like_data import (
+from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
+from ipsc_digital_twin.models.regenai_pt_data import (
     CategoryEncoder,
-    FullCPALikeDataset,
-    build_full_cpa_like_dataloaders,
+    RegenAIPTDataset,
+    build_regenai_pt_dataloaders,
 )
 
 
@@ -58,13 +58,13 @@ def test_missing_torch_gives_clear_message(monkeypatch: pytest.MonkeyPatch) -> N
 def test_dataset_and_dataloader_encoding_with_torch_if_available() -> None:
     torch = pytest.importorskip("torch")
     adata = _make_mock_adata()
-    config = FullCPALikeConfig(
+    config = RegenAIPTConfig(
         input_layer="raw_counts",
         batch_size=8,
         covariate_keys=("replicate", "sequencing_run"),
     )
 
-    bundle = build_full_cpa_like_dataloaders(adata, config)
+    bundle = build_regenai_pt_dataloaders(adata, config)
 
     total_len = len(bundle.train_dataset) + len(bundle.val_dataset) + len(bundle.test_dataset)
     assert total_len == adata.n_obs
@@ -84,10 +84,10 @@ def test_dataset_and_dataloader_encoding_with_torch_if_available() -> None:
     assert batch["dose_value"].dtype.is_floating_point
 
 
-def test_full_cpa_like_dataset_length_equals_number_of_selected_cells_if_available() -> None:
+def test_regenai_pt_dataset_length_equals_number_of_selected_cells_if_available() -> None:
     pytest.importorskip("torch")
     adata = _make_mock_adata(n_cells=18)
-    config = FullCPALikeConfig(covariate_keys=("replicate",))
+    config = RegenAIPTConfig(covariate_keys=("replicate",))
     treatment_encoder = CategoryEncoder.fit(adata.obs[config.treatment_key].astype(str).tolist())
     covariate_encoders = {
         "replicate": CategoryEncoder.fit(adata.obs["replicate"].astype(str).tolist()),
@@ -97,7 +97,7 @@ def test_full_cpa_like_dataset_length_equals_number_of_selected_cells_if_availab
         "time_point": CategoryEncoder.fit(adata.obs["time_point"].astype(str).tolist()),
     }
     indices = np.arange(10)
-    dataset = FullCPALikeDataset(
+    dataset = RegenAIPTDataset(
         adata=adata,
         config=config,
         treatment_encoder=treatment_encoder,

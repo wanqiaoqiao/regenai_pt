@@ -3,12 +3,12 @@ from __future__ import annotations
 import pytest
 
 
-def test_full_cpa_like_model_forward_shapes_and_behavior_if_torch_available() -> None:
+def test_regenai_pt_model_forward_shapes_and_behavior_if_torch_available() -> None:
     torch = pytest.importorskip("torch")
-    from ipsc_digital_twin.models.full_cpa_like_model import FullCPALikeNet
+    from ipsc_digital_twin.models.regenai_pt_model import RegenAIPTNet
 
     torch.manual_seed(0)
-    model = FullCPALikeNet(
+    model = RegenAIPTNet(
         input_dim=12,
         n_treatments=4,
         covariate_cardinalities={"batch": 3, "iPSC_line": 2},
@@ -40,10 +40,10 @@ def test_full_cpa_like_model_forward_shapes_and_behavior_if_torch_available() ->
 
 def test_encode_returns_latent_and_embeddings_differ_if_torch_available() -> None:
     torch = pytest.importorskip("torch")
-    from ipsc_digital_twin.models.full_cpa_like_model import FullCPALikeNet
+    from ipsc_digital_twin.models.regenai_pt_model import RegenAIPTNet
 
     torch.manual_seed(1)
-    model = FullCPALikeNet(
+    model = RegenAIPTNet(
         input_dim=10,
         n_treatments=3,
         covariate_cardinalities={"batch": 2},
@@ -64,10 +64,10 @@ def test_encode_returns_latent_and_embeddings_differ_if_torch_available() -> Non
 
 def test_dose_changes_prediction_if_torch_available() -> None:
     torch = pytest.importorskip("torch")
-    from ipsc_digital_twin.models.full_cpa_like_model import FullCPALikeNet
+    from ipsc_digital_twin.models.regenai_pt_model import RegenAIPTNet
 
     torch.manual_seed(2)
-    model = FullCPALikeNet(
+    model = RegenAIPTNet(
         input_dim=8,
         n_treatments=2,
         covariate_cardinalities={"batch": 2},
@@ -92,9 +92,9 @@ def test_dose_changes_prediction_if_torch_available() -> None:
 
 def test_decode_and_covariate_embeddings_if_torch_available() -> None:
     torch = pytest.importorskip("torch")
-    from ipsc_digital_twin.models.full_cpa_like_model import FullCPALikeNet
+    from ipsc_digital_twin.models.regenai_pt_model import RegenAIPTNet
 
-    model = FullCPALikeNet(
+    model = RegenAIPTNet(
         input_dim=6,
         n_treatments=2,
         covariate_cardinalities={"batch": 2, "replicate": 3},

@@ -8,8 +8,8 @@ import pandas as pd
 import pytest
 
 from ipsc_digital_twin.cli import main
-from ipsc_digital_twin.models.full_cpa_like_adapter import FullCPALikeForwardAdapter
-from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
+from ipsc_digital_twin.models.regenai_pt_adapter import RegenAIPTForwardAdapter
+from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
 
 
 def _make_round_adata(n_per_group: int = 6) -> ad.AnnData:
@@ -93,9 +93,9 @@ def _train_and_save_adapter(tmp_path: Path) -> tuple[Path, Path]:
     input_path = tmp_path / 'current.h5ad'
     current = adata[adata.obs['time_point'].astype(str) == 'intermediate'].copy()
     current.write_h5ad(input_path)
-    adapter = FullCPALikeForwardAdapter().fit(
+    adapter = RegenAIPTForwardAdapter().fit(
         adata,
-        FullCPALikeConfig(
+        RegenAIPTConfig(
             input_layer='raw_counts',
             covariate_keys=('replicate', 'sequencing_run'),
             n_latent=4,

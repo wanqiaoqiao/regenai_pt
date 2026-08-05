@@ -4,9 +4,9 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 
-from ipsc_digital_twin.models.full_cpa_like_config import (
-    FullCPALikeConfig,
-    validate_full_cpa_like_adata,
+from ipsc_digital_twin.models.regenai_pt_config import (
+    RegenAIPTConfig,
+    validate_regenai_pt_adata,
 )
 
 
@@ -35,8 +35,8 @@ def _make_valid_adata(n_per_treatment: int = 12) -> ad.AnnData:
     return adata
 
 
-def test_full_cpa_like_config_defaults_work() -> None:
-    config = FullCPALikeConfig()
+def test_regenai_pt_config_defaults_work() -> None:
+    config = RegenAIPTConfig()
     assert config.model_type == "regenai_pt"
     assert config.input_layer == "X"
     assert config.n_latent > 0
@@ -47,42 +47,42 @@ def test_full_cpa_like_config_defaults_work() -> None:
     assert config.gradient_clip_norm == 5.0
 
 
-def test_full_cpa_like_config_rejects_nonpositive_gradient_clip_norm() -> None:
+def test_regenai_pt_config_rejects_nonpositive_gradient_clip_norm() -> None:
     for value in (0.0, -1.0):
         try:
-            FullCPALikeConfig(gradient_clip_norm=value)
+            RegenAIPTConfig(gradient_clip_norm=value)
         except ValueError as exc:
             assert "gradient_clip_norm must be positive" in str(exc)
         else:
             raise AssertionError("Expected invalid gradient_clip_norm to fail")
 
 
-def test_validate_full_cpa_like_adata_missing_treatment_key_fails_clearly() -> None:
+def test_validate_regenai_pt_adata_missing_treatment_key_fails_clearly() -> None:
     adata = _make_valid_adata()
-    config = FullCPALikeConfig(treatment_key="perturbation")
+    config = RegenAIPTConfig(treatment_key="perturbation")
 
-    report = validate_full_cpa_like_adata(adata, config)
+    report = validate_regenai_pt_adata(adata, config)
 
     assert not report.is_valid
     assert any("Required adata.obs column missing: 'perturbation'" in error for error in report.errors)
 
 
-def test_validate_full_cpa_like_adata_missing_control_treatment_fails_clearly() -> None:
+def test_validate_regenai_pt_adata_missing_control_treatment_fails_clearly() -> None:
     adata = _make_valid_adata()
     adata.obs["treatment"] = adata.obs["treatment"].replace({"control": "vehicle"})
-    config = FullCPALikeConfig(control_treatment="control")
+    config = RegenAIPTConfig(control_treatment="control")
 
-    report = validate_full_cpa_like_adata(adata, config)
+    report = validate_regenai_pt_adata(adata, config)
 
     assert not report.is_valid
     assert any("Control treatment 'control'" in error for error in report.errors)
 
 
-def test_validate_full_cpa_like_adata_valid_mock_passes() -> None:
+def test_validate_regenai_pt_adata_valid_mock_passes() -> None:
     adata = _make_valid_adata()
-    config = FullCPALikeConfig(covariate_keys=("replicate",), input_layer="raw_counts")
+    config = RegenAIPTConfig(covariate_keys=("replicate",), input_layer="raw_counts")
 
-    report = validate_full_cpa_like_adata(adata, config)
+    report = validate_regenai_pt_adata(adata, config)
 
     assert report.is_valid
     assert report.n_cells == adata.n_obs
@@ -90,11 +90,11 @@ def test_validate_full_cpa_like_adata_valid_mock_passes() -> None:
     assert report.errors == []
 
 
-def test_validate_full_cpa_like_adata_warns_for_small_treatments() -> None:
+def test_validate_regenai_pt_adata_warns_for_small_treatments() -> None:
     adata = _make_valid_adata(n_per_treatment=3)
-    config = FullCPALikeConfig()
+    config = RegenAIPTConfig()
 
-    report = validate_full_cpa_like_adata(adata, config)
+    report = validate_regenai_pt_adata(adata, config)
 
     assert report.is_valid
     assert any("low cell counts" in warning for warning in report.warnings)

@@ -31,18 +31,6 @@ try:  # optional torch-backed adapter
 except ImportError:  # pragma: no cover
     RegenAIPTForwardAdapter = None  # type: ignore[misc,assignment]
 
-# Compatibility aliases for the pre-RegenAI-PT public API.
-FullCPALikeConfig = RegenAIPTConfig
-FullCPALikeDataBundle = RegenAIPTDataBundle
-FullCPALikeDataset = RegenAIPTDataset
-FullCPALikeForwardAdapter = RegenAIPTForwardAdapter
-FullCPALikeMappings = RegenAIPTMappings
-FullCPALikeTrainer = RegenAIPTTrainer
-FullCPALikeValidationReport = RegenAIPTValidationReport
-build_full_cpa_like_dataloaders = build_regenai_pt_dataloaders
-compute_full_cpa_like_loss = compute_regenai_pt_loss
-validate_full_cpa_like_adata = validate_regenai_pt_adata
-
 __all__ = [
     'CategoryEncoder',
     'CurrentStateProfile',

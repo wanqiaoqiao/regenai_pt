@@ -654,12 +654,3 @@ def train_and_register_regenai_pt_forward_transition(
         random_seed=random_seed,
         dataset_metadata=dataset_metadata,
     )
-
-
-# Compatibility aliases for scripts written before the RegenAI-PT rename.
-FULL_CPA_LIKE_LIMITATIONS = REGENAI_PT_LIMITATIONS
-_full_cpa_like_architecture_summary = _regenai_pt_architecture_summary
-_write_full_cpa_like_model_card = _write_regenai_pt_model_card
-_save_full_cpa_like_supporting_artifacts = _save_regenai_pt_supporting_artifacts
-train_and_register_full_cpa_like = train_and_register_regenai_pt
-train_and_register_full_cpa_like_forward_transition = train_and_register_regenai_pt_forward_transition

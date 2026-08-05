@@ -3,14 +3,14 @@ from __future__ import annotations
 import pytest
 
 
-def test_full_cpa_like_loss_components_if_torch_available() -> None:
+def test_regenai_pt_loss_components_if_torch_available() -> None:
     torch = pytest.importorskip("torch")
-    from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
-    from ipsc_digital_twin.models.full_cpa_like_losses import compute_full_cpa_like_loss
-    from ipsc_digital_twin.models.full_cpa_like_model import FullCPALikeNet
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
+    from ipsc_digital_twin.models.regenai_pt_losses import compute_regenai_pt_loss
+    from ipsc_digital_twin.models.regenai_pt_model import RegenAIPTNet
 
     torch.manual_seed(0)
-    model = FullCPALikeNet(
+    model = RegenAIPTNet(
         input_dim=10,
         n_treatments=3,
         covariate_cardinalities={"batch": 2, "replicate": 3},
@@ -19,7 +19,7 @@ def test_full_cpa_like_loss_components_if_torch_available() -> None:
         n_layers=2,
         dropout=0.0,
     )
-    config = FullCPALikeConfig(
+    config = RegenAIPTConfig(
         reconstruction_loss="mse",
         adversarial_weight=1.0,
         covariate_adversarial_weight=0.5,
@@ -44,7 +44,7 @@ def test_full_cpa_like_loss_components_if_torch_available() -> None:
         covariates=batch["covariate_ids"],
     )
 
-    loss_dict = compute_full_cpa_like_loss(outputs=outputs, batch=batch, model=model, config=config)
+    loss_dict = compute_regenai_pt_loss(outputs=outputs, batch=batch, model=model, config=config)
 
     assert set(loss_dict) == {
         "total_loss",
@@ -65,11 +65,11 @@ def test_full_cpa_like_loss_components_if_torch_available() -> None:
 
 def test_reconstruction_loss_decreases_when_prediction_matches_input_if_torch_available() -> None:
     torch = pytest.importorskip("torch")
-    from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
-    from ipsc_digital_twin.models.full_cpa_like_losses import compute_full_cpa_like_loss
-    from ipsc_digital_twin.models.full_cpa_like_model import FullCPALikeNet
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
+    from ipsc_digital_twin.models.regenai_pt_losses import compute_regenai_pt_loss
+    from ipsc_digital_twin.models.regenai_pt_model import RegenAIPTNet
 
-    model = FullCPALikeNet(
+    model = RegenAIPTNet(
         input_dim=6,
         n_treatments=2,
         covariate_cardinalities={"batch": 2},
@@ -78,7 +78,7 @@ def test_reconstruction_loss_decreases_when_prediction_matches_input_if_torch_av
         n_layers=2,
         dropout=0.0,
     )
-    config = FullCPALikeConfig(reconstruction_loss="mse")
+    config = RegenAIPTConfig(reconstruction_loss="mse")
 
     x = torch.randn(3, 6)
     batch = {
@@ -96,8 +96,8 @@ def test_reconstruction_loss_decreases_when_prediction_matches_input_if_torch_av
     outputs_good = dict(outputs_bad)
     outputs_good["x_hat"] = x.clone()
 
-    loss_bad = compute_full_cpa_like_loss(outputs=outputs_bad, batch=batch, model=model, config=config)
-    loss_good = compute_full_cpa_like_loss(outputs=outputs_good, batch=batch, model=model, config=config)
+    loss_bad = compute_regenai_pt_loss(outputs=outputs_bad, batch=batch, model=model, config=config)
+    loss_good = compute_regenai_pt_loss(outputs=outputs_good, batch=batch, model=model, config=config)
 
     assert loss_good["reconstruction_loss"] <= loss_bad["reconstruction_loss"]
     assert torch.allclose(loss_good["reconstruction_loss"], torch.tensor(0.0), atol=1e-6)
@@ -105,11 +105,11 @@ def test_reconstruction_loss_decreases_when_prediction_matches_input_if_torch_av
 
 def test_losses_remain_finite_without_covariates_if_torch_available() -> None:
     torch = pytest.importorskip("torch")
-    from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
-    from ipsc_digital_twin.models.full_cpa_like_losses import compute_full_cpa_like_loss
-    from ipsc_digital_twin.models.full_cpa_like_model import FullCPALikeNet
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
+    from ipsc_digital_twin.models.regenai_pt_losses import compute_regenai_pt_loss
+    from ipsc_digital_twin.models.regenai_pt_model import RegenAIPTNet
 
-    model = FullCPALikeNet(
+    model = RegenAIPTNet(
         input_dim=5,
         n_treatments=2,
         covariate_cardinalities={},
@@ -118,7 +118,7 @@ def test_losses_remain_finite_without_covariates_if_torch_available() -> None:
         n_layers=2,
         dropout=0.0,
     )
-    config = FullCPALikeConfig(reconstruction_loss="mse")
+    config = RegenAIPTConfig(reconstruction_loss="mse")
     batch = {
         "x": torch.randn(2, 5),
         "treatment_id": torch.tensor([0, 1], dtype=torch.long),
@@ -126,7 +126,7 @@ def test_losses_remain_finite_without_covariates_if_torch_available() -> None:
         "covariate_ids": {},
     }
     outputs = model(x=batch["x"], treatment_id=batch["treatment_id"], dose=batch["dose_value"], covariates=None)
-    loss_dict = compute_full_cpa_like_loss(outputs=outputs, batch=batch, model=model, config=config)
+    loss_dict = compute_regenai_pt_loss(outputs=outputs, batch=batch, model=model, config=config)
 
     assert torch.isfinite(loss_dict["covariate_adv_loss"])
     assert torch.isfinite(loss_dict["embedding_l2_loss"])
@@ -135,12 +135,12 @@ def test_losses_remain_finite_without_covariates_if_torch_available() -> None:
 
 def test_zero_active_adversarial_weight_excludes_adversarial_losses_if_torch_available() -> None:
     torch = pytest.importorskip("torch")
-    from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
-    from ipsc_digital_twin.models.full_cpa_like_losses import compute_full_cpa_like_loss
-    from ipsc_digital_twin.models.full_cpa_like_model import FullCPALikeNet
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
+    from ipsc_digital_twin.models.regenai_pt_losses import compute_regenai_pt_loss
+    from ipsc_digital_twin.models.regenai_pt_model import RegenAIPTNet
 
-    model = FullCPALikeNet(input_dim=5, n_treatments=2, n_latent=3, n_hidden=6)
-    config = FullCPALikeConfig(
+    model = RegenAIPTNet(input_dim=5, n_treatments=2, n_latent=3, n_hidden=6)
+    config = RegenAIPTConfig(
         embedding_l2_weight=0.0,
         dose_regularization_weight=0.0,
     )
@@ -155,7 +155,7 @@ def test_zero_active_adversarial_weight_excludes_adversarial_losses_if_torch_ava
         treatment_id=batch["treatment_id"],
         dose=batch["dose_value"],
     )
-    losses = compute_full_cpa_like_loss(
+    losses = compute_regenai_pt_loss(
         outputs=outputs,
         batch=batch,
         model=model,

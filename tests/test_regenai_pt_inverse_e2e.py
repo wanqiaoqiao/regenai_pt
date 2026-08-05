@@ -117,15 +117,15 @@ def _treatment_library() -> list[dict[str, object]]:
 
 
 
-def test_full_cpa_like_inverse_recommendation_e2e_if_torch_available(tmp_path: Path) -> None:
+def test_regenai_pt_inverse_recommendation_e2e_if_torch_available(tmp_path: Path) -> None:
     pytest.importorskip('torch')
-    from ipsc_digital_twin.models.full_cpa_like_adapter import FullCPALikeForwardAdapter
-    from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
+    from ipsc_digital_twin.models.regenai_pt_adapter import RegenAIPTForwardAdapter
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
 
     adata = _make_e2e_mock_adata()
-    adapter = FullCPALikeForwardAdapter().fit(
+    adapter = RegenAIPTForwardAdapter().fit(
         adata,
-        FullCPALikeConfig(
+        RegenAIPTConfig(
             input_layer='raw_counts',
             covariate_keys=('iPSC_line', 'batch', 'round', 'time_point', 'replicate'),
             n_latent=6,
@@ -175,7 +175,7 @@ def test_full_cpa_like_inverse_recommendation_e2e_if_torch_available(tmp_path: P
 
     output_dir = tmp_path / 'inverse_e2e_outputs'
     output_dir.mkdir(parents=True, exist_ok=True)
-    model_path = output_dir / 'full_cpa_like_e2e_model.pt'
+    model_path = output_dir / 'regenai_pt_e2e_model.pt'
     adapter.save(model_path)
     recommendations_path = output_dir / 'recommendations.csv'
     summary_path = output_dir / 'recommendation_summary.json'

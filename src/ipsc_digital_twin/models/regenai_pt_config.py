@@ -92,12 +92,8 @@ class RegenAIPTConfig:
     device: Literal["auto", "cpu", "cuda"] = "auto"
 
     def __post_init__(self) -> None:
-        if self.model_type not in {"regenai_pt", "full_cpa_like"}:
-            raise ValueError(
-                "RegenAIPTConfig.model_type must be 'regenai_pt' "
-                "or the legacy alias 'full_cpa_like'"
-            )
-        self.model_type = "regenai_pt"
+        if self.model_type != "regenai_pt":
+            raise ValueError("RegenAIPTConfig.model_type must be 'regenai_pt'")
         if self.input_layer not in _ALLOWED_INPUT_LAYERS:
             raise ValueError(f"input_layer must be one of {sorted(_ALLOWED_INPUT_LAYERS)}")
         if self.reconstruction_loss not in _ALLOWED_RECON_LOSSES:

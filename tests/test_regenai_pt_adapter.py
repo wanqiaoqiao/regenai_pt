@@ -123,14 +123,14 @@ def test_forward_transition_baseline_still_works() -> None:
     assert 'recommendation_score' in recs.columns
 
 
-def test_full_cpa_like_adapter_conforms_and_predicts_if_torch_available(tmp_path: Path) -> None:
+def test_regenai_pt_adapter_conforms_and_predicts_if_torch_available(tmp_path: Path) -> None:
     pytest.importorskip('torch')
-    from ipsc_digital_twin.models.full_cpa_like_adapter import FullCPALikeForwardAdapter
-    from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
+    from ipsc_digital_twin.models.regenai_pt_adapter import RegenAIPTForwardAdapter
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
 
     adata = _make_round_adata()
     current = adata[adata.obs['time_point'].astype(str) == 'intermediate'].copy()
-    config = FullCPALikeConfig(
+    config = RegenAIPTConfig(
         input_layer='raw_counts',
         covariate_keys=('replicate', 'sequencing_run'),
         n_latent=4,
@@ -141,7 +141,7 @@ def test_full_cpa_like_adapter_conforms_and_predicts_if_torch_available(tmp_path
         batch_size=8,
         device='cpu',
     )
-    adapter = FullCPALikeForwardAdapter().fit(adata, config)
+    adapter = RegenAIPTForwardAdapter().fit(adata, config)
 
     assert isinstance(adapter, ForwardTransitionModelInterface)
 
@@ -172,21 +172,21 @@ def test_full_cpa_like_adapter_conforms_and_predicts_if_torch_available(tmp_path
 
     save_path = tmp_path / 'adapter.pt'
     adapter.save(save_path)
-    loaded = FullCPALikeForwardAdapter.load(save_path)
+    loaded = RegenAIPTForwardAdapter.load(save_path)
     loaded_pred = loaded.predict_future_state(current_profile, round1_treatment='A', iPSC_line='line1')
     assert loaded_pred.stage == 'post_round1'
 
 
-def test_inverse_recommender_accepts_full_cpa_like_adapter_if_torch_available() -> None:
+def test_inverse_recommender_accepts_regenai_pt_adapter_if_torch_available() -> None:
     pytest.importorskip('torch')
-    from ipsc_digital_twin.models.full_cpa_like_adapter import FullCPALikeForwardAdapter
-    from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
+    from ipsc_digital_twin.models.regenai_pt_adapter import RegenAIPTForwardAdapter
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
 
     adata = _make_round_adata()
     current = adata[adata.obs['time_point'].astype(str) == 'intermediate'].copy()
-    adapter = FullCPALikeForwardAdapter().fit(
+    adapter = RegenAIPTForwardAdapter().fit(
         adata,
-        FullCPALikeConfig(
+        RegenAIPTConfig(
             input_layer='raw_counts',
             covariate_keys=('replicate', 'sequencing_run'),
             n_latent=4,

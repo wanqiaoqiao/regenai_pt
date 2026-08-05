@@ -10,7 +10,7 @@ from ipsc_digital_twin.cli import main
 from ipsc_digital_twin.model_registry import ModelRegistry
 from ipsc_digital_twin.registry import DatasetRegistry
 from ipsc_digital_twin.training import (
-    _write_full_cpa_like_model_card,
+    _write_regenai_pt_model_card,
     train_and_register_baseline,
 )
 
@@ -115,7 +115,7 @@ def test_cli_train_and_models_commands(tmp_path: Path) -> None:
     assert rc_desc == 0
 
 
-def test_full_cpa_like_model_card_contains_required_sections(tmp_path: Path) -> None:
+def test_regenai_pt_model_card_contains_required_sections(tmp_path: Path) -> None:
     card_path = tmp_path / "regenai_pt_model_card.md"
     model_record = {
         "model_id": "model_123",
@@ -160,7 +160,7 @@ def test_full_cpa_like_model_card_contains_required_sections(tmp_path: Path) -> 
         "val_reconstruction_loss": [0.2, 0.125],
     }
 
-    _write_full_cpa_like_model_card(
+    _write_regenai_pt_model_card(
         card_path,
         model_record,
         dataset_metadata=dataset_metadata,

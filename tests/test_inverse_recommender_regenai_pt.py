@@ -112,17 +112,17 @@ def _required_cols() -> set[str]:
     }
 
 
-def test_full_cpa_like_recommender_runs_one_and_two_step_if_torch_available() -> None:
+def test_regenai_pt_recommender_runs_one_and_two_step_if_torch_available() -> None:
     pytest.importorskip('torch')
-    from ipsc_digital_twin.models.full_cpa_like_adapter import FullCPALikeForwardAdapter
-    from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
+    from ipsc_digital_twin.models.regenai_pt_adapter import RegenAIPTForwardAdapter
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
 
     adata = _make_round_adata()
     current = adata[adata.obs['time_point'].astype(str) == 'intermediate'].copy()
     target = adata[adata.obs['time_point'].astype(str) == 'post_round2'].copy()
-    adapter = FullCPALikeForwardAdapter().fit(
+    adapter = RegenAIPTForwardAdapter().fit(
         adata,
-        FullCPALikeConfig(
+        RegenAIPTConfig(
             input_layer='raw_counts',
             covariate_keys=('replicate', 'sequencing_run'),
             n_latent=4,
@@ -148,17 +148,17 @@ def test_full_cpa_like_recommender_runs_one_and_two_step_if_torch_available() ->
     assert (recs['recommendation_type'] == 'sequential').any()
 
 
-def test_full_cpa_like_recommender_one_step_only_if_torch_available() -> None:
+def test_regenai_pt_recommender_one_step_only_if_torch_available() -> None:
     pytest.importorskip('torch')
-    from ipsc_digital_twin.models.full_cpa_like_adapter import FullCPALikeForwardAdapter
-    from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
+    from ipsc_digital_twin.models.regenai_pt_adapter import RegenAIPTForwardAdapter
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
 
     adata = _make_round_adata()
     current = adata[adata.obs['time_point'].astype(str) == 'intermediate'].copy()
     target = adata[adata.obs['time_point'].astype(str) == 'post_round1'].copy()
-    adapter = FullCPALikeForwardAdapter().fit(
+    adapter = RegenAIPTForwardAdapter().fit(
         adata,
-        FullCPALikeConfig(input_layer='raw_counts', covariate_keys=('replicate', 'sequencing_run'), max_epochs=1, batch_size=8, device='cpu'),
+        RegenAIPTConfig(input_layer='raw_counts', covariate_keys=('replicate', 'sequencing_run'), max_epochs=1, batch_size=8, device='cpu'),
     )
     recs = recommend_inverse_treatments(
         current_state=current,
@@ -174,15 +174,15 @@ def test_full_cpa_like_recommender_one_step_only_if_torch_available() -> None:
 
 def test_sequence_order_differs_if_torch_available() -> None:
     pytest.importorskip('torch')
-    from ipsc_digital_twin.models.full_cpa_like_adapter import FullCPALikeForwardAdapter
-    from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
+    from ipsc_digital_twin.models.regenai_pt_adapter import RegenAIPTForwardAdapter
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
 
     adata = _make_round_adata()
     current = adata[adata.obs['time_point'].astype(str) == 'intermediate'].copy()
     target = adata[adata.obs['time_point'].astype(str) == 'post_round2'].copy()
-    adapter = FullCPALikeForwardAdapter().fit(
+    adapter = RegenAIPTForwardAdapter().fit(
         adata,
-        FullCPALikeConfig(input_layer='raw_counts', covariate_keys=('replicate', 'sequencing_run'), max_epochs=1, batch_size=8, device='cpu'),
+        RegenAIPTConfig(input_layer='raw_counts', covariate_keys=('replicate', 'sequencing_run'), max_epochs=1, batch_size=8, device='cpu'),
     )
     recs = recommend_inverse_treatments(
         current_state=current,

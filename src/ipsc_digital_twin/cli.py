@@ -28,12 +28,6 @@ from .training import (
 from .treatments import load_treatment_library
 
 
-def _parse_model_backend(value: str) -> str:
-    if value == 'full_cpa_like':
-        return 'regenai_pt'
-    return value
-
-
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='ipsc-twin', description='iPSC production CLI')
     sub = parser.add_subparsers(dest='command', required=True)
@@ -65,12 +59,10 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument(
         '--model-type',
         required=True,
-        type=_parse_model_backend,
         choices=['baseline', 'forward_transition', 'regenai_pt'],
     )
     train.add_argument(
         '--transition-model',
-        type=_parse_model_backend,
         choices=['baseline', 'regenai_pt'],
         default='baseline',
     )

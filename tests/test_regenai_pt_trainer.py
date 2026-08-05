@@ -34,13 +34,13 @@ def _make_mock_adata(n_cells: int = 36) -> ad.AnnData:
     return adata
 
 
-def test_full_cpa_like_trainer_fit_encode_predict_and_save_load_if_torch_available(tmp_path: Path) -> None:
+def test_regenai_pt_trainer_fit_encode_predict_and_save_load_if_torch_available(tmp_path: Path) -> None:
     pytest.importorskip("torch")
-    from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
-    from ipsc_digital_twin.models.full_cpa_like_trainer import FullCPALikeTrainer
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
+    from ipsc_digital_twin.models.regenai_pt_trainer import RegenAIPTTrainer
 
     adata = _make_mock_adata()
-    config = FullCPALikeConfig(
+    config = RegenAIPTConfig(
         input_layer="raw_counts",
         covariate_keys=("replicate", "sequencing_run"),
         n_latent=5,
@@ -52,7 +52,7 @@ def test_full_cpa_like_trainer_fit_encode_predict_and_save_load_if_torch_availab
         learning_rate=1e-3,
         device="cpu",
     )
-    trainer = FullCPALikeTrainer(config)
+    trainer = RegenAIPTTrainer(config)
     trainer.fit(adata)
 
     assert trainer.model is not None
@@ -87,7 +87,7 @@ def test_full_cpa_like_trainer_fit_encode_predict_and_save_load_if_torch_availab
     trainer.save(save_path)
     assert save_path.exists()
 
-    loaded = FullCPALikeTrainer.load(save_path)
+    loaded = RegenAIPTTrainer.load(save_path)
     assert loaded.model is not None
     assert loaded.mappings is not None
     assert loaded.history.keys() == trainer.history.keys()
@@ -98,11 +98,11 @@ def test_full_cpa_like_trainer_fit_encode_predict_and_save_load_if_torch_availab
 
 def test_adversarial_warmup_and_ramp_schedule_if_torch_available() -> None:
     pytest.importorskip("torch")
-    from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
-    from ipsc_digital_twin.models.full_cpa_like_trainer import FullCPALikeTrainer
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
+    from ipsc_digital_twin.models.regenai_pt_trainer import RegenAIPTTrainer
 
-    trainer = FullCPALikeTrainer(
-        FullCPALikeConfig(
+    trainer = RegenAIPTTrainer(
+        RegenAIPTConfig(
             warmup_epochs=2,
             ramp_epochs=2,
             max_adversarial_weight=0.05,
@@ -121,8 +121,8 @@ def test_gradient_clipping_is_applied_during_training_if_torch_available(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     torch = pytest.importorskip("torch")
-    from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
-    from ipsc_digital_twin.models.full_cpa_like_trainer import FullCPALikeTrainer
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
+    from ipsc_digital_twin.models.regenai_pt_trainer import RegenAIPTTrainer
 
     calls: list[float] = []
     original_clip = torch.nn.utils.clip_grad_norm_
@@ -132,7 +132,7 @@ def test_gradient_clipping_is_applied_during_training_if_torch_available(
         return original_clip(parameters, max_norm, *args, **kwargs)
 
     monkeypatch.setattr(torch.nn.utils, "clip_grad_norm_", recording_clip)
-    config = FullCPALikeConfig(
+    config = RegenAIPTConfig(
         input_layer="raw_counts",
         gradient_clip_norm=2.5,
         max_epochs=1,
@@ -142,19 +142,19 @@ def test_gradient_clipping_is_applied_during_training_if_torch_available(
         device="cpu",
     )
 
-    FullCPALikeTrainer(config).fit(_make_mock_adata(n_cells=18))
+    RegenAIPTTrainer(config).fit(_make_mock_adata(n_cells=18))
 
     assert calls
     assert set(calls) == {2.5}
 
 
-def test_full_cpa_like_trainer_predict_uses_string_and_scalar_covariates_if_torch_available() -> None:
+def test_regenai_pt_trainer_predict_uses_string_and_scalar_covariates_if_torch_available() -> None:
     pytest.importorskip("torch")
-    from ipsc_digital_twin.models.full_cpa_like_config import FullCPALikeConfig
-    from ipsc_digital_twin.models.full_cpa_like_trainer import FullCPALikeTrainer
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
+    from ipsc_digital_twin.models.regenai_pt_trainer import RegenAIPTTrainer
 
     adata = _make_mock_adata(n_cells=18)
-    config = FullCPALikeConfig(
+    config = RegenAIPTConfig(
         input_layer="raw_counts",
         covariate_keys=("replicate",),
         n_latent=4,
@@ -165,7 +165,7 @@ def test_full_cpa_like_trainer_predict_uses_string_and_scalar_covariates_if_torc
         batch_size=6,
         device="cpu",
     )
-    trainer = FullCPALikeTrainer(config).fit(adata)
+    trainer = RegenAIPTTrainer(config).fit(adata)
     preds = trainer.predict_adata(
         adata,
         treatment="B",

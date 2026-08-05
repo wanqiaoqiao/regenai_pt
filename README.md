@@ -8,6 +8,7 @@ This is not a clinical system. It does not make clinical claims, and it should b
 
 - `v0.1.0`: RegenAI-PT production platform before training-stability upgrades.
 - `v0.2.0`: Adds per-component loss logging, adversarial warm-up/ramp scheduling, and gradient clipping.
+- `v0.3.0`: Removes deprecated pre-RegenAI-PT module, class, function, CLI, and test names.
 
 ## What This Program Covers
 
