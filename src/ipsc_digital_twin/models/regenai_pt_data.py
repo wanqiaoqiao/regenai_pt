@@ -324,6 +324,7 @@ def _collect_covariate_keys(adata: ad.AnnData, config: RegenAIPTConfig) -> list[
         config.round_key,
         config.time_key,
         config.treatment_role_key,
+        config.cell_type_key,
         *config.covariate_keys,
     ]
     for key in base_keys:

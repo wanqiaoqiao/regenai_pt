@@ -187,11 +187,19 @@ def _write_regenai_pt_model_card(
     if not reconstruction_lines:
         reconstruction_lines.append('- Reconstruction metrics not available in this training run.')
 
+    distribution_lines = [
+        f"- {key}: {_format_metric_value(value)}"
+        for key, value in metrics.items()
+        if any(metric in key for metric in ('mean', 'mean_DE', 'Var', 'Var_DE'))
+    ]
+    if not distribution_lines:
+        distribution_lines.append('- Distribution metrics were not computed for this run.')
+
     leakage_lines = []
     leakage_metrics = leakage_metrics or {
         key: value
         for key, value in metrics.items()
-        if 'leakage' in key or key.startswith('treatment_adv') or key.startswith('covariate_adv')
+        if 'leakage' in key or 'disent' in key or key.startswith('treatment_adv') or key.startswith('covariate_adv')
     }
     if leakage_metrics:
         for key, value in leakage_metrics.items():
@@ -236,6 +244,8 @@ def _write_regenai_pt_model_card(
         f"- lr_scheduler_factor: {config_payload.get('lr_scheduler_factor', 'unknown')}",
         f"- lr_scheduler_patience: {config_payload.get('lr_scheduler_patience', 'unknown')}",
         f"- early_stopping_patience: {config_payload.get('early_stopping_patience', 'unknown')}",
+        f"- n_de_genes: {config_payload.get('n_de_genes', 'unknown')}",
+        f"- cell_type_key: {config_payload.get('cell_type_key', 'unknown')}",
         f"- gradient_clip_norm: {config_payload.get('gradient_clip_norm', 'unknown')}",
         '',
         '## Training Run',
@@ -245,6 +255,9 @@ def _write_regenai_pt_model_card(
         '',
         '## Reconstruction Metrics',
         *reconstruction_lines,
+        '',
+        '## Distribution Metrics',
+        *distribution_lines,
         '',
         '## Adversarial Leakage Metrics',
         *leakage_lines,
@@ -280,6 +293,12 @@ def _final_loss_metrics(history: dict[str, list[float]], prefix: str = '') -> di
             'embedding_l2_loss',
             'dose_regularization_loss',
             'total_loss',
+            'mean',
+            'mean_DE',
+            'Var',
+            'Var_DE',
+            'perturbation_disent',
+            'cell_type_disent',
         ):
             key = f'{split}_{component}'
             values = history.get(key, [])
@@ -650,6 +669,8 @@ def train_and_register_regenai_pt_forward_transition(
     lr_scheduler_factor: float = 0.5,
     lr_scheduler_patience: int = 5,
     early_stopping_patience: int = 15,
+    n_de_genes: int = 100,
+    cell_type_key: str = 'time_point',
     dataset_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return train_and_register_regenai_pt(
@@ -671,6 +692,8 @@ def train_and_register_regenai_pt_forward_transition(
             'lr_scheduler_factor': lr_scheduler_factor,
             'lr_scheduler_patience': lr_scheduler_patience,
             'early_stopping_patience': early_stopping_patience,
+            'n_de_genes': n_de_genes,
+            'cell_type_key': cell_type_key,
         },
         treatment_mode='combined_rounds',
         random_seed=random_seed,

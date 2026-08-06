@@ -11,6 +11,7 @@ This is not a clinical system. It does not make clinical claims, and it should b
 - `v0.3.0`: Removes deprecated pre-RegenAI-PT module, class, function, CLI, and test names.
 - `v0.4.0`: Adds validation-reconstruction-driven learning-rate reduction.
 - `v0.5.0`: Adds best-checkpoint early stopping on validation reconstruction loss.
+- `v0.6.0`: Adds expression-distribution and latent-disentanglement training metrics.
 
 ## What This Program Covers
 
@@ -219,6 +220,21 @@ that checkpoint after training, and serializes the restored best model rather
 than automatically using the final epoch. Configure patience with
 `--early-stopping-patience`.
 
+Each epoch also reports six CPA-style diagnostics in the training-history CSV:
+
+- `mean`: average treatment-group R-squared between observed and predicted gene means.
+- `mean_DE`: the same mean R-squared restricted to treatment-specific DE genes.
+- `Var`: average treatment-group R-squared between observed and predicted gene variances.
+- `Var_DE`: the same variance R-squared restricted to treatment-specific DE genes.
+- `perturbation_disent`: chance-adjusted inverse treatment-probe accuracy on `z_basal`; higher is better.
+- `cell_type_disent`: chance-adjusted inverse configured cell-identity-probe accuracy on `z_basal`; higher is better.
+
+DE genes are selected independently for each treatment versus control from the
+training split. The default is the top 100 genes and can be changed with
+`--n-de-genes`. `--cell-type-key` selects the observation column used for the
+cell-identity metric. It defaults to `time_point`; use a biological annotation
+such as `cell_type` or `stage_label` when one is available.
+
 This is **RegenAI-PT** in spirit and interface, but it is not presented as the official CPA implementation.
 
 ### Support for Round 1 and Round 2
@@ -288,6 +304,8 @@ ipsc-twin train \
   --lr-scheduler-factor 0.5 \
   --lr-scheduler-patience 5 \
   --early-stopping-patience 15 \
+  --n-de-genes 100 \
+  --cell-type-key time_point \
   --gradient-clip-norm 5.0
 ```
 

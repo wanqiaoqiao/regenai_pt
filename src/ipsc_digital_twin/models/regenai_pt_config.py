@@ -81,6 +81,8 @@ class RegenAIPTConfig:
     lr_scheduler_patience: int = 5
     early_stopping_patience: int = 15
     gradient_clip_norm: float = 5.0
+    n_de_genes: int = 100
+    cell_type_key: str = "time_point"
     reconstruction_loss: Literal["mse", "nb", "zinb"] = "mse"
     warmup_epochs: int = 20
     ramp_epochs: int = 20
@@ -121,6 +123,10 @@ class RegenAIPTConfig:
             raise ValueError("early_stopping_patience must be positive")
         if self.gradient_clip_norm <= 0.0:
             raise ValueError("gradient_clip_norm must be positive")
+        if self.n_de_genes <= 0:
+            raise ValueError("n_de_genes must be positive")
+        if not self.cell_type_key:
+            raise ValueError("cell_type_key must be a non-empty string")
         if self.adversarial_weight < 0.0:
             raise ValueError("adversarial_weight must be non-negative")
         if self.warmup_epochs < 0:
@@ -207,6 +213,11 @@ def validate_regenai_pt_adata(adata: ad.AnnData, config: RegenAIPTConfig) -> Reg
     for key in required_obs_keys:
         if key not in obs.columns:
             report.errors.append(f"Required adata.obs column missing: '{key}'")
+
+    if config.cell_type_key not in obs.columns:
+        report.warnings.append(
+            f"Cell-type disentanglement metric is unavailable because adata.obs['{config.cell_type_key}'] is missing"
+        )
 
     if config.treatment_role_key and config.treatment_role_key in obs.columns:
         roles = set(obs[config.treatment_role_key].astype(str).dropna().tolist())

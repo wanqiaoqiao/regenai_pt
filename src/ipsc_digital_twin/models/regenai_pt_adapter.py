@@ -376,6 +376,7 @@ class RegenAIPTForwardAdapter(ForwardTransitionModelInterface):
             'best_val_reconstruction_loss': trainer.best_val_reconstruction_loss,
             'best_epoch': trainer.best_epoch,
             'stopped_early': trainer.stopped_early,
+            'de_gene_indices': {key: value.tolist() for key, value in trainer.de_gene_indices.items()},
         }
 
     @staticmethod
@@ -393,6 +394,10 @@ class RegenAIPTForwardAdapter(ForwardTransitionModelInterface):
         trainer.best_val_reconstruction_loss = payload.get('best_val_reconstruction_loss')
         trainer.best_epoch = payload.get('best_epoch')
         trainer.stopped_early = bool(payload.get('stopped_early', False))
+        trainer.de_gene_indices = {
+            int(key): np.asarray(value, dtype=np.int64)
+            for key, value in payload.get('de_gene_indices', {}).items()
+        }
         trainer.model.eval()
         return trainer
 

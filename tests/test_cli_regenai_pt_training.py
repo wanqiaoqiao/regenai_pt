@@ -164,6 +164,9 @@ def test_cli_regenai_pt_training_and_registry_if_torch_available(tmp_path: Path)
     assert history['adversarial_weight'].iloc[-1] == pytest.approx(0.05)
     assert 'learning_rate' in history.columns
     assert history['learning_rate'].iloc[-1] == pytest.approx(0.001)
+    for split in ('train', 'val'):
+        for metric in ('mean', 'mean_DE', 'Var', 'Var_DE', 'perturbation_disent', 'cell_type_disent'):
+            assert f'{split}_{metric}' in history.columns
 
     metrics_path = next(out_dir.glob('*_metrics.json'))
     metrics = json.loads(metrics_path.read_text(encoding='utf-8'))

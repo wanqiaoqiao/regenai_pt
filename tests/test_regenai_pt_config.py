@@ -48,6 +48,8 @@ def test_regenai_pt_config_defaults_work() -> None:
     assert config.lr_scheduler_patience == 5
     assert config.early_stopping_patience == 15
     assert config.gradient_clip_norm == 5.0
+    assert config.n_de_genes == 100
+    assert config.cell_type_key == "time_point"
 
 
 def test_regenai_pt_config_rejects_invalid_lr_scheduler_settings() -> None:
@@ -85,6 +87,13 @@ def test_regenai_pt_config_rejects_nonpositive_early_stopping_patience() -> None
             assert "early_stopping_patience must be positive" in str(exc)
         else:
             raise AssertionError("Expected invalid early_stopping_patience to fail")
+
+
+def test_regenai_pt_config_rejects_invalid_extended_metric_settings() -> None:
+    with np.testing.assert_raises_regex(ValueError, "n_de_genes must be positive"):
+        RegenAIPTConfig(n_de_genes=0)
+    with np.testing.assert_raises_regex(ValueError, "cell_type_key must be a non-empty string"):
+        RegenAIPTConfig(cell_type_key="")
 
 
 def test_validate_regenai_pt_adata_missing_treatment_key_fails_clearly() -> None:

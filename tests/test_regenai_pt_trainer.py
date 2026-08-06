@@ -75,6 +75,18 @@ def test_regenai_pt_trainer_fit_encode_predict_and_save_load_if_torch_available(
     assert trainer.history["adversarial_weight"] == [0.0] * trainer.epochs_trained
     assert len(trainer.history["learning_rate"]) == trainer.epochs_trained
     assert np.isfinite(trainer.history["learning_rate"]).all()
+    for metric in (
+        "mean",
+        "mean_DE",
+        "Var",
+        "Var_DE",
+        "perturbation_disent",
+        "cell_type_disent",
+    ):
+        for split in ("train", "val"):
+            values = trainer.history[f"{split}_{metric}"]
+            assert len(values) == trainer.epochs_trained
+            assert np.isfinite(values).all()
 
     z = trainer.encode_adata(adata)
     assert z.shape == (adata.n_obs, config.n_latent)
@@ -95,6 +107,7 @@ def test_regenai_pt_trainer_fit_encode_predict_and_save_load_if_torch_available(
     assert loaded.history.keys() == trainer.history.keys()
     assert loaded.best_epoch == trainer.best_epoch
     assert loaded.stopped_early == trainer.stopped_early
+    assert loaded.de_gene_indices.keys() == trainer.de_gene_indices.keys()
 
     preds_loaded = loaded.predict_adata(adata, treatment="A", dose=1.5)
     assert preds_loaded["x_hat"].shape == preds["x_hat"].shape

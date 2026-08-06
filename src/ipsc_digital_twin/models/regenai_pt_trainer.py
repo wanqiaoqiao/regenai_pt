@@ -21,6 +21,11 @@ except ImportError as exc:  # pragma: no cover
     ) from exc
 
 from .regenai_pt_losses import compute_regenai_pt_loss
+from .regenai_pt_metrics import (
+    EXTENDED_TRAINING_METRICS,
+    RegenAIPTEpochMetricAccumulator,
+    select_treatment_de_genes,
+)
 from .regenai_pt_model import RegenAIPTNet
 
 LOGGER = logging.getLogger(__name__)
@@ -49,6 +54,10 @@ class RegenAIPTTrainer:
         }
         self.history["adversarial_weight"] = []
         self.history["learning_rate"] = []
+        for split in ("train", "val"):
+            for metric in EXTENDED_TRAINING_METRICS:
+                self.history[f"{split}_{metric}"] = []
+        self.de_gene_indices: dict[int, np.ndarray] = {}
         self.best_val_reconstruction_loss: float | None = None
         self.best_state_dict: dict[str, torch.Tensor] | None = None
         self.best_epoch: int | None = None
@@ -120,6 +129,31 @@ class RegenAIPTTrainer:
             patience=self.config.lr_scheduler_patience,
         )
 
+    def _initialize_extended_metrics(self, train_dataset: Any) -> None:
+        if self.mappings is None:
+            raise RuntimeError("Mappings must be initialized before training metrics")
+        control_id = self.mappings.treatment_to_id.get(self.config.control_treatment)
+        if control_id is None:
+            raise ValueError(
+                f"Control treatment {self.config.control_treatment!r} is missing from treatment mappings"
+            )
+        self.de_gene_indices = select_treatment_de_genes(
+            train_dataset.expression,
+            train_dataset.treatment_ids,
+            control_id=control_id,
+            n_top_genes=self.config.n_de_genes,
+        )
+
+    def _new_metric_accumulator(self) -> RegenAIPTEpochMetricAccumulator:
+        if self.mappings is None:
+            raise RuntimeError("Mappings must be initialized before training metrics")
+        control_id = self.mappings.treatment_to_id[self.config.control_treatment]
+        return RegenAIPTEpochMetricAccumulator(
+            control_treatment_id=control_id,
+            de_gene_indices=self.de_gene_indices,
+            cell_type_key=self.config.cell_type_key,
+        )
+
     def fit(self, adata: ad.AnnData) -> RegenAIPTTrainer:
         report = validate_regenai_pt_adata(adata, self.config)
         if not report.is_valid:
@@ -128,6 +162,7 @@ class RegenAIPTTrainer:
         data_bundle = build_regenai_pt_dataloaders(adata=adata, config=self.config)
         self.mappings = data_bundle.mappings
         self.model = self._initialize_model(self.mappings)
+        self._initialize_extended_metrics(data_bundle.train_dataset)
         optimizer = AdamW(self.model.parameters(), lr=self.config.learning_rate, weight_decay=self.config.weight_decay)
         lr_scheduler = self._initialize_lr_scheduler(optimizer)
 
@@ -152,6 +187,9 @@ class RegenAIPTTrainer:
             for component in LOSS_COMPONENTS:
                 self.history[f"train_{component}"].append(train_metrics[component])
                 self.history[f"val_{component}"].append(val_metrics[component])
+            for metric in EXTENDED_TRAINING_METRICS:
+                self.history[f"train_{metric}"].append(train_metrics.get(metric, float("nan")))
+                self.history[f"val_{metric}"].append(val_metrics.get(metric, float("nan")))
             self.history["adversarial_weight"].append(active_adversarial_weight)
             self.history["learning_rate"].append(current_learning_rate)
             LOGGER.info(
@@ -162,6 +200,19 @@ class RegenAIPTTrainer:
                 active_adversarial_weight,
                 " ".join(f"{key}={train_metrics[key]:.6f}" for key in LOSS_COMPONENTS),
                 " ".join(f"{key}={val_metrics[key]:.6f}" for key in LOSS_COMPONENTS),
+            )
+            LOGGER.info(
+                "Epoch %d/%d | train metrics %s | val metrics %s",
+                epoch + 1,
+                self.config.max_epochs,
+                " ".join(
+                    f"{key}={train_metrics.get(key, float('nan')):.6f}"
+                    for key in EXTENDED_TRAINING_METRICS
+                ),
+                " ".join(
+                    f"{key}={val_metrics.get(key, float('nan')):.6f}"
+                    for key in EXTENDED_TRAINING_METRICS
+                ),
             )
             self.epochs_trained = epoch + 1
             if val_recon < best_val:
@@ -195,6 +246,7 @@ class RegenAIPTTrainer:
             raise RuntimeError("Model has not been initialized")
         self.model.train()
         accum = {key: 0.0 for key in LOSS_COMPONENTS}
+        metric_accumulator = self._new_metric_accumulator()
         n_batches = 0
         for batch in train_loader:
             batch = self._move_batch_to_device(batch)
@@ -221,12 +273,19 @@ class RegenAIPTTrainer:
                 max_norm=self.config.gradient_clip_norm,
             )
             optimizer.step()
+            metric_accumulator.update(batch, outputs)
             for key in accum:
                 accum[key] += float(loss_dict[key].detach().cpu().item())
             n_batches += 1
         if n_batches == 0:
-            return {key: float("nan") for key in accum}
-        return {key: value / n_batches for key, value in accum.items()}
+            return {
+                **{key: float("nan") for key in accum},
+                **{key: float("nan") for key in EXTENDED_TRAINING_METRICS},
+            }
+        return {
+            **{key: value / n_batches for key, value in accum.items()},
+            **metric_accumulator.compute(),
+        }
 
     @torch.no_grad()
     def validate_epoch(
@@ -238,6 +297,7 @@ class RegenAIPTTrainer:
             raise RuntimeError("Model has not been initialized")
         self.model.eval()
         accum = {key: 0.0 for key in LOSS_COMPONENTS}
+        metric_accumulator = self._new_metric_accumulator()
         n_batches = 0
         for batch in val_loader:
             batch = self._move_batch_to_device(batch)
@@ -259,10 +319,17 @@ class RegenAIPTTrainer:
             )
             for key in accum:
                 accum[key] += float(loss_dict[key].detach().cpu().item())
+            metric_accumulator.update(batch, outputs)
             n_batches += 1
         if n_batches == 0:
-            return {key: float("nan") for key in accum}
-        return {key: value / n_batches for key, value in accum.items()}
+            return {
+                **{key: float("nan") for key in accum},
+                **{key: float("nan") for key in EXTENDED_TRAINING_METRICS},
+            }
+        return {
+            **{key: value / n_batches for key, value in accum.items()},
+            **metric_accumulator.compute(),
+        }
 
     def _ensure_fitted(self) -> None:
         if self.model is None or self.mappings is None:
@@ -412,6 +479,7 @@ class RegenAIPTTrainer:
             "best_val_reconstruction_loss": self.best_val_reconstruction_loss,
             "best_epoch": self.best_epoch,
             "stopped_early": self.stopped_early,
+            "de_gene_indices": {key: value.tolist() for key, value in self.de_gene_indices.items()},
         }
         torch.save(payload, Path(path))
 
@@ -430,7 +498,11 @@ class RegenAIPTTrainer:
         trainer.best_val_reconstruction_loss = payload.get("best_val_reconstruction_loss")
         trainer.best_epoch = payload.get("best_epoch")
         trainer.stopped_early = bool(payload.get("stopped_early", False))
+        trainer.de_gene_indices = {
+            int(key): np.asarray(value, dtype=np.int64)
+            for key, value in payload.get("de_gene_indices", {}).items()
+        }
         trainer.model.eval()
         return trainer
 
-__all__ = ["LOSS_COMPONENTS", "RegenAIPTTrainer"]
+__all__ = ["EXTENDED_TRAINING_METRICS", "LOSS_COMPONENTS", "RegenAIPTTrainer"]

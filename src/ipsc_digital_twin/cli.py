@@ -85,6 +85,8 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument('--lr-scheduler-patience', type=int, default=5)
     train.add_argument('--early-stopping-patience', type=int, default=15)
     train.add_argument('--gradient-clip-norm', type=float, default=5.0)
+    train.add_argument('--n-de-genes', type=int, default=100)
+    train.add_argument('--cell-type-key', default='time_point')
     train.add_argument('--reconstruction-loss', choices=['mse', 'nb', 'zinb'], default='mse')
     train.add_argument('--warmup-epochs', type=int, default=20)
     train.add_argument('--ramp-epochs', type=int, default=20)
@@ -416,6 +418,8 @@ def main(argv: list[str] | None = None) -> int:
                         lr_scheduler_factor=args.lr_scheduler_factor,
                         lr_scheduler_patience=args.lr_scheduler_patience,
                         early_stopping_patience=args.early_stopping_patience,
+                        n_de_genes=args.n_de_genes,
+                        cell_type_key=args.cell_type_key,
                         dataset_metadata=ds,
                     )
                 else:
@@ -456,6 +460,8 @@ def main(argv: list[str] | None = None) -> int:
                         'lr_scheduler_factor': args.lr_scheduler_factor,
                         'lr_scheduler_patience': args.lr_scheduler_patience,
                         'early_stopping_patience': args.early_stopping_patience,
+                        'n_de_genes': args.n_de_genes,
+                        'cell_type_key': args.cell_type_key,
                         'reconstruction_loss': args.reconstruction_loss,
                         'warmup_epochs': args.warmup_epochs,
                         'ramp_epochs': args.ramp_epochs,
