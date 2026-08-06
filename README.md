@@ -12,6 +12,7 @@ This is not a clinical system. It does not make clinical claims, and it should b
 - `v0.4.0`: Adds validation-reconstruction-driven learning-rate reduction.
 - `v0.5.0`: Adds best-checkpoint early stopping on validation reconstruction loss.
 - `v0.6.0`: Adds expression-distribution and latent-disentanglement training metrics.
+- `v0.7.0`: Adds auditable cell-state and treatment-component latent-space visualizations.
 
 ## What This Program Covers
 
@@ -242,6 +243,39 @@ This is **RegenAI-PT** in spirit and interface, but it is not presented as the o
 The same backend supports the two-stage experiment structure:
 - **Round 1**: `intermediate + round1_treatment -> post_round1`
 - **Round 2**: `post_round1 + round2_treatment -> post_round2`
+
+### Cell And Drug Latent Spaces
+
+RegenAI-PT can export two-dimensional latent-space figures and their underlying
+coordinate tables. Cell plots encode the model's basal state `z_basal`, sample
+round-relevant cells, and color them using an `adata.obs` annotation. Drug plots
+project learned treatment-component embeddings and draw vectors from the control
+component, similar to a perturbation embedding map.
+
+```bash
+ipsc-twin plot-cell-latent \
+  --model-path outputs/regenai_pt_v0.6.0_combined_lr1e-4_epoch_30/ds_6c6ecc56d6b6_regenai_pt_combined_model.pt \
+  --adata sample_data/prepared_h5ad_2026_07/regenai_pt_train_only.h5ad \
+  --round-number 1 \
+  --color-by time_point \
+  --method pca \
+  --max-cells 3000 \
+  --output-dir outputs/regenai_pt_v0.6.0_combined_lr1e-4_epoch_30/latent_plots
+```
+
+```bash
+ipsc-twin plot-drug-latent \
+  --model-path outputs/regenai_pt_v0.6.0_combined_lr1e-4_epoch_30/ds_6c6ecc56d6b6_regenai_pt_combined_model.pt \
+  --round-number 1 \
+  --method kernel_pca \
+  --output-dir outputs/regenai_pt_v0.6.0_combined_lr1e-4_epoch_30/latent_plots
+```
+
+Run each command with `--round-number 2` for the second transition model. Every
+PNG has a same-named CSV containing projected coordinates and labels. PCA is the
+default for cells; RBF kernel PCA is the default for treatment components. These
+plots are exploratory representations of learned model geometry, not evidence
+that nearby treatments share a validated mechanism.
 - **Sequential simulation**: `A -> B`
 
 In round-2 mode, `round1_treatment` can also be included as a context covariate so the model can condition on treatment history.

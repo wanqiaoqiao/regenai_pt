@@ -110,6 +110,25 @@ def _build_parser() -> argparse.ArgumentParser:
     simulate_sequence.add_argument('--round2-dose', type=float)
     simulate_sequence.add_argument('--output-dir', required=True)
 
+    plot_cells = sub.add_parser('plot-cell-latent', help='Plot RegenAI-PT basal cell-state latent space')
+    plot_cells.add_argument('--model-path', required=True)
+    plot_cells.add_argument('--adata', required=True)
+    plot_cells.add_argument('--output-dir', required=True)
+    plot_cells.add_argument('--round-number', type=int, choices=[1, 2], default=1)
+    plot_cells.add_argument('--color-by', default='time_point')
+    plot_cells.add_argument('--method', choices=['pca', 'kernel_pca'], default='pca')
+    plot_cells.add_argument('--max-cells', type=int, default=3000)
+    plot_cells.add_argument('--batch-size', type=int, default=256)
+    plot_cells.add_argument('--random-seed', type=int, default=0)
+    plot_cells.add_argument('--gamma', type=float)
+
+    plot_drugs = sub.add_parser('plot-drug-latent', help='Plot RegenAI-PT treatment-component latent space')
+    plot_drugs.add_argument('--model-path', required=True)
+    plot_drugs.add_argument('--output-dir', required=True)
+    plot_drugs.add_argument('--round-number', type=int, choices=[1, 2], default=1)
+    plot_drugs.add_argument('--method', choices=['pca', 'kernel_pca'], default='kernel_pca')
+    plot_drugs.add_argument('--gamma', type=float)
+
     recommend = sub.add_parser('recommend', help='Inverse treatment recommendation')
     recommend.add_argument('--registry-dir', required=True)
     recommend.add_argument('--model-id', required=True)
@@ -339,6 +358,41 @@ def _simulate_sequence_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _plot_cell_latent_command(args: argparse.Namespace) -> int:
+    from .latent_visualization import plot_cell_latent_space
+
+    output_dir = Path(args.output_dir)
+    result = plot_cell_latent_space(
+        args.model_path,
+        ad.read_h5ad(args.adata),
+        output_dir / f'cell_latent_round{args.round_number}.png',
+        round_number=args.round_number,
+        method=args.method,
+        color_by=args.color_by,
+        max_cells=args.max_cells,
+        batch_size=args.batch_size,
+        random_state=args.random_seed,
+        gamma=args.gamma,
+    )
+    print(json.dumps(result))
+    return 0
+
+
+def _plot_drug_latent_command(args: argparse.Namespace) -> int:
+    from .latent_visualization import plot_drug_latent_space
+
+    output_dir = Path(args.output_dir)
+    result = plot_drug_latent_space(
+        args.model_path,
+        output_dir / f'drug_latent_round{args.round_number}.png',
+        round_number=args.round_number,
+        method=args.method,
+        gamma=args.gamma,
+    )
+    print(json.dumps(result))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
     parser = _build_parser()
@@ -482,6 +536,12 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == 'simulate-sequence':
             return _simulate_sequence_command(args)
+
+        if args.command == 'plot-cell-latent':
+            return _plot_cell_latent_command(args)
+
+        if args.command == 'plot-drug-latent':
+            return _plot_drug_latent_command(args)
 
         if args.command == 'recommend':
             model_reg = ModelRegistry(Path(args.registry_dir) / 'models.json')
