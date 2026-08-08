@@ -299,10 +299,15 @@ def _final_loss_metrics(history: dict[str, list[float]], prefix: str = '') -> di
             'Var_DE',
             'perturbation_disent',
             'cell_type_disent',
+            'covariate_adv_accuracy',
         ):
             key = f'{split}_{component}'
             values = history.get(key, [])
             if values:
+                metrics[f'{prefix}final_{key}'] = float(values[-1])
+        dynamic_prefix = f'{split}_covariate_adv_accuracy_'
+        for key, values in history.items():
+            if key.startswith(dynamic_prefix) and values:
                 metrics[f'{prefix}final_{key}'] = float(values[-1])
     if history.get('adversarial_weight'):
         metrics[f'{prefix}final_adversarial_weight'] = float(history['adversarial_weight'][-1])

@@ -24,6 +24,7 @@ from .regenai_pt_losses import compute_regenai_pt_loss
 from .regenai_pt_metrics import (
     EXTENDED_TRAINING_METRICS,
     RegenAIPTEpochMetricAccumulator,
+    covariate_accuracy_metric_name,
     select_treatment_de_genes,
 )
 from .regenai_pt_model import RegenAIPTNet
@@ -143,6 +144,18 @@ class RegenAIPTTrainer:
             control_id=control_id,
             n_top_genes=self.config.n_de_genes,
         )
+        for split in ("train", "val"):
+            for metric in self._extended_metric_names():
+                self.history.setdefault(f"{split}_{metric}", [])
+
+    def _extended_metric_names(self) -> tuple[str, ...]:
+        covariate_metrics: tuple[str, ...] = ()
+        if self.mappings is not None:
+            covariate_metrics = tuple(
+                covariate_accuracy_metric_name(key)
+                for key in self.mappings.covariate_to_id
+            )
+        return (*EXTENDED_TRAINING_METRICS, *covariate_metrics)
 
     def _new_metric_accumulator(self) -> RegenAIPTEpochMetricAccumulator:
         if self.mappings is None:
@@ -187,7 +200,7 @@ class RegenAIPTTrainer:
             for component in LOSS_COMPONENTS:
                 self.history[f"train_{component}"].append(train_metrics[component])
                 self.history[f"val_{component}"].append(val_metrics[component])
-            for metric in EXTENDED_TRAINING_METRICS:
+            for metric in self._extended_metric_names():
                 self.history[f"train_{metric}"].append(train_metrics.get(metric, float("nan")))
                 self.history[f"val_{metric}"].append(val_metrics.get(metric, float("nan")))
             self.history["adversarial_weight"].append(active_adversarial_weight)
@@ -207,11 +220,11 @@ class RegenAIPTTrainer:
                 self.config.max_epochs,
                 " ".join(
                     f"{key}={train_metrics.get(key, float('nan')):.6f}"
-                    for key in EXTENDED_TRAINING_METRICS
+                    for key in self._extended_metric_names()
                 ),
                 " ".join(
                     f"{key}={val_metrics.get(key, float('nan')):.6f}"
-                    for key in EXTENDED_TRAINING_METRICS
+                    for key in self._extended_metric_names()
                 ),
             )
             self.epochs_trained = epoch + 1
@@ -280,7 +293,7 @@ class RegenAIPTTrainer:
         if n_batches == 0:
             return {
                 **{key: float("nan") for key in accum},
-                **{key: float("nan") for key in EXTENDED_TRAINING_METRICS},
+                **{key: float("nan") for key in self._extended_metric_names()},
             }
         return {
             **{key: value / n_batches for key, value in accum.items()},
@@ -324,7 +337,7 @@ class RegenAIPTTrainer:
         if n_batches == 0:
             return {
                 **{key: float("nan") for key in accum},
-                **{key: float("nan") for key in EXTENDED_TRAINING_METRICS},
+                **{key: float("nan") for key in self._extended_metric_names()},
             }
         return {
             **{key: value / n_batches for key, value in accum.items()},

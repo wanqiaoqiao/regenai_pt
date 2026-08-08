@@ -82,6 +82,9 @@ def test_regenai_pt_trainer_fit_encode_predict_and_save_load_if_torch_available(
         "Var_DE",
         "perturbation_disent",
         "cell_type_disent",
+        "covariate_adv_accuracy",
+        "covariate_adv_accuracy_replicate",
+        "covariate_adv_accuracy_sequencing_run",
     ):
         for split in ("train", "val"):
             values = trainer.history[f"{split}_{metric}"]

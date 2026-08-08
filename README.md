@@ -221,7 +221,7 @@ that checkpoint after training, and serializes the restored best model rather
 than automatically using the final epoch. Configure patience with
 `--early-stopping-patience`.
 
-Each epoch also reports six CPA-style diagnostics in the training-history CSV:
+Each epoch also reports CPA-style diagnostics in the training-history CSV:
 
 - `mean`: average treatment-group R-squared between observed and predicted gene means.
 - `mean_DE`: the same mean R-squared restricted to treatment-specific DE genes.
@@ -229,6 +229,14 @@ Each epoch also reports six CPA-style diagnostics in the training-history CSV:
 - `Var_DE`: the same variance R-squared restricted to treatment-specific DE genes.
 - `perturbation_disent`: chance-adjusted inverse treatment-probe accuracy on `z_basal`; higher is better.
 - `cell_type_disent`: chance-adjusted inverse configured cell-identity-probe accuracy on `z_basal`; higher is better.
+- `covariate_adv_accuracy`: macro-average raw accuracy across all configured covariate adversaries.
+- `covariate_adv_accuracy_<key>`: raw adversary accuracy for each covariate, such as `iPSC_line`, `batch`, `round`, or `time_point`.
+
+Covariate adversary accuracy is a leakage diagnostic: lower values near the
+chance or majority-class baseline indicate that less covariate information is
+recoverable from `z_basal`. It should not be interpreted as a metric to
+maximize, and raw accuracies across imbalanced covariates are not directly
+comparable.
 
 DE genes are selected independently for each treatment versus control from the
 training split. The default is the top 100 genes and can be changed with

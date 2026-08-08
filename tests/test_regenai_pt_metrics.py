@@ -74,6 +74,8 @@ def test_epoch_metrics_are_perfect_for_exact_predictions_if_torch_available() ->
         assert metrics[key] == pytest.approx(1.0)
     assert metrics["perturbation_disent"] == pytest.approx(1.0)
     assert metrics["cell_type_disent"] == pytest.approx(1.0)
+    assert metrics["covariate_adv_accuracy"] == pytest.approx(0.5)
+    assert metrics["covariate_adv_accuracy_time_point"] == pytest.approx(0.5)
 
 
 def test_distribution_metrics_decrease_for_inaccurate_predictions_if_torch_available() -> None:

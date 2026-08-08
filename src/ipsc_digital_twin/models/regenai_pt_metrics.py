@@ -12,7 +12,13 @@ EXTENDED_TRAINING_METRICS = (
     "Var_DE",
     "perturbation_disent",
     "cell_type_disent",
+    "covariate_adv_accuracy",
 )
+
+
+def covariate_accuracy_metric_name(covariate_key: str) -> str:
+    """Return the history/metrics key for one covariate adversary."""
+    return f"covariate_adv_accuracy_{covariate_key}"
 
 
 def select_treatment_de_genes(
@@ -110,6 +116,8 @@ class RegenAIPTEpochMetricAccumulator:
         self.cell_type_correct = 0
         self.cell_type_total = 0
         self.cell_type_counts: dict[int, int] = {}
+        self.covariate_correct: dict[str, int] = {}
+        self.covariate_total: dict[str, int] = {}
 
     @staticmethod
     def _update_counts(targets: np.ndarray, counts: dict[int, int]) -> None:
@@ -160,6 +168,19 @@ class RegenAIPTEpochMetricAccumulator:
             self.cell_type_total += int(len(cell_targets))
             self._update_counts(cell_targets, self.cell_type_counts)
 
+        for key, logits in outputs.get("covariate_logits_adv", {}).items():
+            targets = batch.get("covariate_ids", {}).get(key)
+            if targets is None:
+                continue
+            target_values = targets.detach().cpu().numpy()
+            predictions = logits.detach().argmax(dim=1).cpu().numpy()
+            self.covariate_correct[key] = self.covariate_correct.get(key, 0) + int(
+                np.sum(predictions == target_values)
+            )
+            self.covariate_total[key] = self.covariate_total.get(key, 0) + int(
+                len(target_values)
+            )
+
     def compute(self) -> dict[str, float]:
         mean_scores: list[float] = []
         mean_de_scores: list[float] = []
@@ -193,7 +214,12 @@ class RegenAIPTEpochMetricAccumulator:
         def average(values: list[float]) -> float:
             return float(np.mean(values)) if values else float("nan")
 
-        return {
+        covariate_accuracies = {
+            key: self.covariate_correct[key] / total
+            for key, total in self.covariate_total.items()
+            if total > 0
+        }
+        result = {
             "mean": average(mean_scores),
             "mean_DE": average(mean_de_scores),
             "Var": average(variance_scores),
@@ -208,11 +234,20 @@ class RegenAIPTEpochMetricAccumulator:
                 self.cell_type_total,
                 self.cell_type_counts,
             ),
+            "covariate_adv_accuracy": average(list(covariate_accuracies.values())),
         }
+        result.update(
+            {
+                covariate_accuracy_metric_name(key): float(accuracy)
+                for key, accuracy in covariate_accuracies.items()
+            }
+        )
+        return result
 
 
 __all__ = [
     "EXTENDED_TRAINING_METRICS",
     "RegenAIPTEpochMetricAccumulator",
+    "covariate_accuracy_metric_name",
     "select_treatment_de_genes",
 ]
