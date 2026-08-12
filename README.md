@@ -13,6 +13,7 @@ This is not a clinical system. It does not make clinical claims, and it should b
 - `v0.5.0`: Adds best-checkpoint early stopping on validation reconstruction loss.
 - `v0.6.0`: Adds expression-distribution and latent-disentanglement training metrics.
 - `v0.7.0`: Adds auditable cell-state and treatment-component latent-space visualizations.
+- `v0.8.0`: Adds perturbation-fidelity validation, Optuna hyperparameter tuning, and reproducible best-parameter retraining.
 
 ## What This Program Covers
 
@@ -140,6 +141,12 @@ python -m pip install --upgrade pip
 python -m pip install .[dev]
 ```
 
+Install the optional Optuna tuning dependency with:
+
+```bash
+python -m pip install '.[tuning]'
+```
+
 Notes:
 - On this machine, the macOS system `python3` was Python `3.9.6`, which is too old for the Production package requirement `>=3.10`.
 - The dedicated Production environment was rebuilt and verified with Python `3.11.14` on July 30, 2026.
@@ -228,6 +235,7 @@ Each epoch also reports CPA-style diagnostics in the training-history CSV:
 - `Var`: average treatment-group R-squared between observed and predicted gene variances.
 - `Var_DE`: the same variance R-squared restricted to treatment-specific DE genes.
 - `perturbation_disent`: chance-adjusted inverse treatment-probe accuracy on `z_basal`; higher is better.
+- `perturbation_fidelity`: cosine alignment between predicted and observed population-level treatment effects relative to control; higher is better.
 - `cell_type_disent`: chance-adjusted inverse configured cell-identity-probe accuracy on `z_basal`; higher is better.
 - `covariate_adv_accuracy`: macro-average raw accuracy across all configured covariate adversaries.
 - `covariate_adv_accuracy_<key>`: raw adversary accuracy for each covariate, such as `iPSC_line`, `batch`, `round`, or `time_point`.
@@ -393,6 +401,53 @@ ipsc-twin train \
   --covariate-keys iPSC_line,batch,round,time_point \
   --max-epochs 50
 ```
+
+#### Tune RegenAI-PT with Optuna
+
+The standalone tuning script runs a persistent TPE study and trains both rounds
+for every trial. It maximizes:
+
+```text
+0.4 * R2_DE
++ 0.3 * R2_mean
++ 0.2 * perturbation_fidelity
++ 0.1 * normalized_reconstruction_quality
+```
+
+Run a pilot study before committing to a larger search:
+
+```bash
+python scripts/tune_regenai_pt_optuna.py \
+  --registry-dir state \
+  --dataset-id ds_6c6ecc56d6b6 \
+  --output-dir outputs/regenai_pt_optuna \
+  --n-trials 12 \
+  --trial-epochs 50 \
+  --reference-reconstruction-loss 0.08 \
+  --input-layer log_normalized \
+  --covariate-keys iPSC_line,batch,round,time_point \
+  --device cpu
+```
+
+The output directory contains a resumable `optuna_study.db`, all trial results
+in `optuna_trials.csv`, and the winning configuration in
+`best_hyperparameters.json`. Trial scoring ignores warm-up-only epochs and uses
+the best finite validation score after adversarial training starts. Each trial
+uses the same seed and data split for a controlled comparison. Tuning does not
+remove treatment, line, batch, or time-point confounding in the source data.
+
+Retrain the combined-round model with the selected `v0.8.0` Optuna parameters:
+
+```bash
+./scripts/retrain_regenai_pt_optuna_best.sh \
+  outputs/regenai_pt_v0.8.0_optuna_best
+```
+
+The script uses dataset `ds_6c6ecc56d6b6` by default, retains early stopping,
+learning-rate scheduling, and gradient clipping, and writes the model artifact,
+training history, metrics, mappings, model card, registry record, and console
+log. Runtime settings can be overridden through `MAX_EPOCHS`, `DEVICE`,
+`RANDOM_SEED`, `REGISTRY_DIR`, `DATASET_ID`, and `CONTROL_TREATMENT`.
 
 #### Simulate a two-step sequence
 

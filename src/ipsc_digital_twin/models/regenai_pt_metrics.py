@@ -11,6 +11,7 @@ EXTENDED_TRAINING_METRICS = (
     "Var",
     "Var_DE",
     "perturbation_disent",
+    "perturbation_fidelity",
     "cell_type_disent",
     "covariate_adv_accuracy",
 )
@@ -96,6 +97,13 @@ def _chance_adjusted_disentanglement(
     return float(np.clip(1.0 - excess_accuracy / (1.0 - majority_accuracy), 0.0, 1.0))
 
 
+def _cosine_similarity(observed: np.ndarray, predicted: np.ndarray) -> float:
+    denominator = float(np.linalg.norm(observed) * np.linalg.norm(predicted))
+    if denominator <= np.finfo(np.float64).eps:
+        return float("nan")
+    return float(np.clip(np.dot(observed, predicted) / denominator, -1.0, 1.0))
+
+
 class RegenAIPTEpochMetricAccumulator:
     """Stream distribution and adversarial-probe metrics across one epoch."""
 
@@ -118,6 +126,8 @@ class RegenAIPTEpochMetricAccumulator:
         self.cell_type_counts: dict[int, int] = {}
         self.covariate_correct: dict[str, int] = {}
         self.covariate_total: dict[str, int] = {}
+        self.predicted_effect_sums: dict[int, np.ndarray] = {}
+        self.predicted_effect_counts: dict[int, int] = {}
 
     @staticmethod
     def _update_counts(targets: np.ndarray, counts: dict[int, int]) -> None:
@@ -153,6 +163,18 @@ class RegenAIPTEpochMetricAccumulator:
                 existing.true_sum_squares += summaries[2]
                 existing.predicted_sum_squares += summaries[3]
 
+            control_prediction = outputs.get("x_hat_control")
+            if control_prediction is not None and treatment != self.control_treatment_id:
+                predicted_effect_sum = (
+                    x_predicted[mask] - control_prediction.detach()[mask]
+                ).sum(dim=0).double().cpu().numpy()
+                if treatment not in self.predicted_effect_sums:
+                    self.predicted_effect_sums[treatment] = predicted_effect_sum
+                    self.predicted_effect_counts[treatment] = n_rows
+                else:
+                    self.predicted_effect_sums[treatment] += predicted_effect_sum
+                    self.predicted_effect_counts[treatment] += n_rows
+
         treatment_targets = treatment_ids.cpu().numpy()
         treatment_predictions = outputs["treatment_logits_adv"].detach().argmax(dim=1).cpu().numpy()
         self.treatment_correct += int(np.sum(treatment_predictions == treatment_targets))
@@ -186,6 +208,7 @@ class RegenAIPTEpochMetricAccumulator:
         mean_de_scores: list[float] = []
         variance_scores: list[float] = []
         variance_de_scores: list[float] = []
+        group_means: dict[int, tuple[np.ndarray, np.ndarray]] = {}
 
         for treatment_id, moments in self.group_moments.items():
             true_mean = moments.true_sum / moments.n
@@ -197,6 +220,7 @@ class RegenAIPTEpochMetricAccumulator:
                 moments.predicted_sum_squares / moments.n - np.square(predicted_mean),
                 0.0,
             )
+            group_means[treatment_id] = (true_mean, predicted_mean)
             mean_scores.append(_r2_score(true_mean, predicted_mean))
             variance_scores.append(_r2_score(true_variance, predicted_variance))
 
@@ -214,6 +238,27 @@ class RegenAIPTEpochMetricAccumulator:
         def average(values: list[float]) -> float:
             return float(np.mean(values)) if values else float("nan")
 
+        perturbation_fidelity_scores: list[float] = []
+        control_means = group_means.get(self.control_treatment_id)
+        if control_means is not None:
+            observed_control, predicted_control = control_means
+            for treatment_id, (observed_treated, predicted_treated) in group_means.items():
+                if treatment_id == self.control_treatment_id:
+                    continue
+                if treatment_id in self.predicted_effect_sums:
+                    predicted_effect = (
+                        self.predicted_effect_sums[treatment_id]
+                        / self.predicted_effect_counts[treatment_id]
+                    )
+                else:
+                    predicted_effect = predicted_treated - predicted_control
+                fidelity = _cosine_similarity(
+                    observed_treated - observed_control,
+                    predicted_effect,
+                )
+                if np.isfinite(fidelity):
+                    perturbation_fidelity_scores.append(fidelity)
+
         covariate_accuracies = {
             key: self.covariate_correct[key] / total
             for key, total in self.covariate_total.items()
@@ -229,6 +274,7 @@ class RegenAIPTEpochMetricAccumulator:
                 self.treatment_total,
                 self.treatment_counts,
             ),
+            "perturbation_fidelity": average(perturbation_fidelity_scores),
             "cell_type_disent": _chance_adjusted_disentanglement(
                 self.cell_type_correct,
                 self.cell_type_total,

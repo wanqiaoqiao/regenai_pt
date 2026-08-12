@@ -73,6 +73,7 @@ def test_epoch_metrics_are_perfect_for_exact_predictions_if_torch_available() ->
     for key in ("mean", "mean_DE", "Var", "Var_DE"):
         assert metrics[key] == pytest.approx(1.0)
     assert metrics["perturbation_disent"] == pytest.approx(1.0)
+    assert metrics["perturbation_fidelity"] == pytest.approx(1.0)
     assert metrics["cell_type_disent"] == pytest.approx(1.0)
     assert metrics["covariate_adv_accuracy"] == pytest.approx(0.5)
     assert metrics["covariate_adv_accuracy_time_point"] == pytest.approx(0.5)
@@ -111,3 +112,37 @@ def test_distribution_metrics_decrease_for_inaccurate_predictions_if_torch_avail
     assert metrics["mean_DE"] < 1.0
     assert metrics["Var"] < 1.0
     assert metrics["Var_DE"] < 1.0
+
+
+def test_perturbation_fidelity_uses_same_cell_control_counterfactual() -> None:
+    torch = pytest.importorskip("torch")
+    from ipsc_digital_twin.models.regenai_pt_metrics import RegenAIPTEpochMetricAccumulator
+
+    x = torch.tensor([[0.0, 0.0], [0.0, 0.0], [1.0, 0.0], [1.0, 0.0]])
+    treatment_ids = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+    accumulator = RegenAIPTEpochMetricAccumulator(
+        control_treatment_id=0,
+        de_gene_indices={1: np.asarray([0, 1])},
+        cell_type_key="time_point",
+    )
+    accumulator.update(
+        {
+            "x": x,
+            "treatment_id": treatment_ids,
+            "covariate_ids": {"time_point": torch.tensor([0, 0, 1, 1])},
+        },
+        {
+            "x_hat": x.clone(),
+            "x_hat_control": torch.tensor(
+                [[0.0, 0.0], [0.0, 0.0], [0.5, 0.5], [0.5, 0.5]]
+            ),
+            "treatment_logits_adv": torch.tensor([[1.0, 0.0]] * 4),
+            "covariate_logits_adv": {
+                "time_point": torch.tensor([[1.0, 0.0]] * 4)
+            },
+        },
+    )
+
+    metrics = accumulator.compute()
+
+    assert metrics["perturbation_fidelity"] == pytest.approx(2**-0.5)

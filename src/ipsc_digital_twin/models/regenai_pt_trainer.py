@@ -167,6 +167,33 @@ class RegenAIPTTrainer:
             cell_type_key=self.config.cell_type_key,
         )
 
+    def _control_counterfactual_expression(
+        self,
+        batch: dict[str, Any],
+        outputs: dict[str, Any],
+    ) -> torch.Tensor:
+        if self.model is None or self.mappings is None:
+            raise RuntimeError("Model and mappings must be initialized")
+        control_component_id = self.mappings.component_to_id.get(
+            self.config.control_treatment
+        )
+        if control_component_id is None:
+            raise ValueError(
+                f"Control component {self.config.control_treatment!r} is missing"
+            )
+        component_ids = torch.full_like(batch["component_ids"], control_component_id)
+        component_doses = torch.zeros_like(batch["component_doses"])
+        component_mask = torch.zeros_like(batch["component_mask"])
+        component_mask[:, 0] = 1.0
+        x_control, _, _, _ = self.model.decode(
+            z_basal=outputs["z_basal"],
+            covariates=batch["covariate_ids"],
+            component_ids=component_ids,
+            component_doses=component_doses,
+            component_mask=component_mask,
+        )
+        return x_control
+
     def fit(self, adata: ad.AnnData) -> RegenAIPTTrainer:
         report = validate_regenai_pt_adata(adata, self.config)
         if not report.is_valid:
@@ -322,6 +349,10 @@ class RegenAIPTTrainer:
                 component_ids=batch["component_ids"],
                 component_doses=batch["component_doses"],
                 component_mask=batch["component_mask"],
+            )
+            outputs["x_hat_control"] = self._control_counterfactual_expression(
+                batch,
+                outputs,
             )
             loss_dict = compute_regenai_pt_loss(
                 outputs=outputs,

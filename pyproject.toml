@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ipsc-digital-twin-production"
-version = "0.7.0"
+version = "0.8.0"
 description = "Production-oriented iPSC digital twin platform utilities"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,6 +20,9 @@ dependencies = [
 [project.optional-dependencies]
 visualization = [
   "matplotlib>=3.7",
+]
+tuning = [
+  "optuna>=4.0,<5.0",
 ]
 dev = [
   "pytest>=8.0",

@@ -171,6 +171,7 @@ def test_cli_regenai_pt_training_and_registry_if_torch_available(tmp_path: Path)
             'Var',
             'Var_DE',
             'perturbation_disent',
+            'perturbation_fidelity',
             'cell_type_disent',
             'covariate_adv_accuracy',
             'covariate_adv_accuracy_iPSC_line',

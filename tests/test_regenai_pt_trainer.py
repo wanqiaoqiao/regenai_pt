@@ -81,6 +81,7 @@ def test_regenai_pt_trainer_fit_encode_predict_and_save_load_if_torch_available(
         "Var",
         "Var_DE",
         "perturbation_disent",
+        "perturbation_fidelity",
         "cell_type_disent",
         "covariate_adv_accuracy",
         "covariate_adv_accuracy_replicate",

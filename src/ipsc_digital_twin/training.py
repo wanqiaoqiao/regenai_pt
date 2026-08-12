@@ -298,6 +298,7 @@ def _final_loss_metrics(history: dict[str, list[float]], prefix: str = '') -> di
             'Var',
             'Var_DE',
             'perturbation_disent',
+            'perturbation_fidelity',
             'cell_type_disent',
             'covariate_adv_accuracy',
         ):
