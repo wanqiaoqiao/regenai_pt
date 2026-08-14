@@ -128,6 +128,37 @@ def _parse_dose_like_value(value: Any) -> list[float]:
     return [float(value)]
 
 
+def _parse_duration_like_value(value: Any) -> list[float]:
+    """Parse per-component durations while preserving unknown values as NaN."""
+    if value is None:
+        return []
+    if isinstance(value, float) and np.isnan(value):
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        if stripped.startswith("[") and stripped.endswith("]"):
+            try:
+                parsed = json.loads(stripped)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, list):
+                return [float("nan") if item is None else float(item) for item in parsed]
+        for separator in ("|", ";", ","):
+            if separator in stripped:
+                return [
+                    float("nan") if part.strip().lower() in {"", "na", "nan", "none", "null"} else float(part.strip())
+                    for part in stripped.split(separator)
+                ]
+        if stripped.lower() in {"na", "nan", "none", "null"}:
+            return [float("nan")]
+        return [float(stripped)]
+    if isinstance(value, (list, tuple, np.ndarray)):
+        return [float("nan") if item is None else float(item) for item in value]
+    return [float(value)]
+
+
 def _serialize_components(components: list[str]) -> str:
     return "+".join(components)
 
@@ -140,6 +171,7 @@ def _ensure_component_columns(
     components_col: str,
     component_doses_col: str,
     component_units_col: str,
+    component_durations_col: str,
 ) -> None:
     if components_col not in adata.obs.columns:
         component_rows: list[list[str]] = []
@@ -171,6 +203,12 @@ def _ensure_component_columns(
     if component_units_col not in adata.obs.columns:
         adata.obs[component_units_col] = [["a.u."] * len(_parse_component_like_value(raw)) for raw in adata.obs[components_col].tolist()]
 
+    if component_durations_col not in adata.obs.columns:
+        adata.obs[component_durations_col] = [
+            [float("nan")] * len(_parse_component_like_value(raw))
+            for raw in adata.obs[components_col].tolist()
+        ]
+
 
 def _canonicalize_component_columns(
     adata: ad.AnnData,
@@ -186,6 +224,7 @@ def _canonicalize_component_columns(
         config.component_key,
         config.component_dose_key,
         config.component_dose_unit_key,
+        config.component_duration_key,
     }
     if required.issubset(adata.obs.columns):
         return adata
@@ -202,6 +241,7 @@ def _canonicalize_component_columns(
         components_col=config.component_key,
         component_doses_col=config.component_dose_key,
         component_units_col=config.component_dose_unit_key,
+        component_durations_col=config.component_duration_key,
     )
     return canonical
 
@@ -236,6 +276,7 @@ def prepare_round_specific_adata(
         source_components_col = cfg.round1_components_key
         source_component_doses_col = cfg.round1_component_doses_key
         source_component_units_col = cfg.round1_component_dose_units_key
+        source_component_durations_col = cfg.round1_component_durations_key
         treatment_role = "round1_treatment"
     else:
         source_mask = np.zeros(adata.n_obs, dtype=bool)
@@ -251,6 +292,7 @@ def prepare_round_specific_adata(
         source_components_col = cfg.round2_components_key
         source_component_doses_col = cfg.round2_component_doses_key
         source_component_units_col = cfg.round2_component_dose_units_key
+        source_component_durations_col = cfg.round2_component_durations_key
         treatment_role = "round2_treatment"
         if cfg.round1_treatment_key not in obs.columns and cfg.round1_components_key not in obs.columns:
             raise ValueError("Round 2 preparation requires round1 treatment history as context covariate")
@@ -271,7 +313,13 @@ def prepare_round_specific_adata(
             components_col=source_components_col,
             component_doses_col=source_component_doses_col,
             component_units_col=source_component_units_col,
+            component_durations_col=source_component_durations_col,
         )
+    elif source_component_durations_col not in subset.obs.columns:
+        subset.obs[source_component_durations_col] = [
+            [float("nan")] * len(_parse_component_like_value(raw))
+            for raw in subset.obs[source_components_col].tolist()
+        ]
 
     resolved_treatment_key = treatment_key or cfg.treatment_key
     resolved_dose_key = dose_key or cfg.dose_key or "dose"
@@ -280,32 +328,40 @@ def prepare_round_specific_adata(
     component_rows: list[list[str]] = []
     component_dose_rows: list[list[float]] = []
     component_unit_rows: list[list[str]] = []
+    component_duration_rows: list[list[float]] = []
     scalar_dose_rows: list[float] = []
-    for is_source, raw_components, raw_doses, raw_units in zip(
+    for is_source, raw_components, raw_doses, raw_units, raw_durations in zip(
         subset_source_mask,
         subset.obs[source_components_col].tolist(),
         subset.obs[source_component_doses_col].tolist(),
         subset.obs[source_component_units_col].tolist(),
+        subset.obs[source_component_durations_col].tolist(),
         strict=False,
     ):
         if bool(is_source):
             components = [cfg.control_treatment]
             doses = [0.0]
             units = ["a.u."]
+            durations = [0.0]
         else:
             components = _parse_component_like_value(raw_components)
             doses = _parse_dose_like_value(raw_doses)
             units = _parse_component_like_value(raw_units)
+            durations = _parse_duration_like_value(raw_durations)
         treatment_rows.append(_serialize_components(components))
         component_rows.append(components)
         component_dose_rows.append(doses or [1.0] * len(components))
         component_unit_rows.append(units or ["a.u."] * len(components))
+        component_duration_rows.append(
+            durations if len(durations) == len(components) else [float("nan")] * len(components)
+        )
         scalar_dose_rows.append(float(doses[0]) if doses else 1.0)
 
     subset.obs[resolved_treatment_key] = treatment_rows
     subset.obs[cfg.component_key] = component_rows
     subset.obs[cfg.component_dose_key] = component_dose_rows
     subset.obs[cfg.component_dose_unit_key] = component_unit_rows
+    subset.obs[cfg.component_duration_key] = component_duration_rows
     subset.obs[resolved_dose_key] = scalar_dose_rows
 
     subset.obs["treatment_role"] = treatment_role
@@ -387,12 +443,20 @@ class RegenAIPTDataset(Dataset):
 
         all_component_ids = np.full((adata.n_obs, config.max_components), 0, dtype=np.int64)
         all_component_doses = np.zeros((adata.n_obs, config.max_components), dtype=np.float32)
+        all_component_durations = np.zeros((adata.n_obs, config.max_components), dtype=np.float32)
+        all_component_duration_mask = np.zeros((adata.n_obs, config.max_components), dtype=np.float32)
         all_component_mask = np.zeros((adata.n_obs, config.max_components), dtype=np.float32)
-        for row_idx, (raw_components, raw_doses) in enumerate(
-            zip(adata.obs[config.component_key].tolist(), adata.obs[config.component_dose_key].tolist(), strict=False)
+        for row_idx, (raw_components, raw_doses, raw_durations) in enumerate(
+            zip(
+                adata.obs[config.component_key].tolist(),
+                adata.obs[config.component_dose_key].tolist(),
+                adata.obs[config.component_duration_key].tolist(),
+                strict=False,
+            )
         ):
             components = _parse_component_like_value(raw_components)
             doses = _parse_dose_like_value(raw_doses)
+            durations = _parse_duration_like_value(raw_durations)
             if not doses:
                 doses = [1.0] * len(components)
             elif len(doses) == 1 and len(components) > 1:
@@ -400,10 +464,18 @@ class RegenAIPTDataset(Dataset):
             for comp_idx, component in enumerate(components[: config.max_components]):
                 all_component_ids[row_idx, comp_idx] = self.component_encoder.category_to_id[str(component)]
                 all_component_doses[row_idx, comp_idx] = float(doses[comp_idx]) if comp_idx < len(doses) else 1.0
+                duration = float(durations[comp_idx]) if comp_idx < len(durations) else float("nan")
+                if np.isfinite(duration):
+                    if duration < 0.0:
+                        raise ValueError("Treatment component durations must be non-negative")
+                    all_component_durations[row_idx, comp_idx] = duration
+                    all_component_duration_mask[row_idx, comp_idx] = 1.0
                 all_component_mask[row_idx, comp_idx] = 1.0
 
         self.component_ids = all_component_ids[self.indices]
         self.component_doses = all_component_doses[self.indices]
+        self.component_durations = all_component_durations[self.indices]
+        self.component_duration_mask = all_component_duration_mask[self.indices]
         self.component_mask = all_component_mask[self.indices]
 
         if config.dose_key and config.dose_key in adata.obs.columns:
@@ -423,18 +495,46 @@ class RegenAIPTDataset(Dataset):
             if sample_weights is not None
             else np.ones(len(self.indices), dtype=np.float32)
         )
+        self.delta_target_lookup: dict[tuple[int, tuple[int, ...]], np.ndarray] = {}
+        self.delta_context_keys: tuple[str, ...] = ()
+        self._zero_delta_target = np.zeros(1, dtype=np.float32)
+        self.delta_targets_configured = False
+
+    def configure_delta_targets(
+        self,
+        lookup: dict[tuple[int, tuple[int, ...]], np.ndarray],
+        context_keys: tuple[str, ...],
+    ) -> None:
+        self.delta_target_lookup = lookup
+        self.delta_context_keys = context_keys
+        self._zero_delta_target = np.zeros(self.expression.shape[1], dtype=np.float32)
+        self.delta_targets_configured = True
+
+    def _delta_target_for_row(self, idx: int) -> tuple[np.ndarray, bool]:
+        if not self.delta_targets_configured:
+            return self._zero_delta_target, False
+        context = tuple(
+            int(self.covariate_ids[key][idx]) for key in self.delta_context_keys
+        )
+        target = self.delta_target_lookup.get((int(self.treatment_ids[idx]), context))
+        if target is None:
+            return self._zero_delta_target, False
+        return target, True
 
     def __len__(self) -> int:
         return int(len(self.indices))
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
         require_torch()
+        delta_target, has_delta_target = self._delta_target_for_row(idx)
         return {
             "x": torch.as_tensor(self.expression[idx], dtype=torch.float32),
             "treatment_id": torch.as_tensor(self.treatment_ids[idx], dtype=torch.long),
             "dose_value": torch.as_tensor(self.dose_values[idx], dtype=torch.float32),
             "component_ids": torch.as_tensor(self.component_ids[idx], dtype=torch.long),
             "component_doses": torch.as_tensor(self.component_doses[idx], dtype=torch.float32),
+            "component_durations": torch.as_tensor(self.component_durations[idx], dtype=torch.float32),
+            "component_duration_mask": torch.as_tensor(self.component_duration_mask[idx], dtype=torch.float32),
             "component_mask": torch.as_tensor(self.component_mask[idx], dtype=torch.float32),
             "covariate_ids": {
                 key: torch.as_tensor(values[idx], dtype=torch.long) for key, values in self.covariate_ids.items()
@@ -443,6 +543,8 @@ class RegenAIPTDataset(Dataset):
             "time_id": torch.as_tensor(self.time_ids[idx], dtype=torch.long),
             "batch_id": torch.as_tensor(self.batch_ids[idx], dtype=torch.long),
             "sample_weight": torch.as_tensor(self.sample_weights[idx], dtype=torch.float32),
+            "delta_target": torch.as_tensor(delta_target, dtype=torch.float32),
+            "delta_mask": torch.as_tensor(has_delta_target, dtype=torch.bool),
         }
 
 

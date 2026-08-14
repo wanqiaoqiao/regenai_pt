@@ -63,12 +63,15 @@ class RegenAIPTConfig:
     round1_components_key: str = "round1_components"
     round1_component_doses_key: str = "round1_doses"
     round1_component_dose_units_key: str = "round1_dose_units"
+    round1_component_durations_key: str = "round1_durations_hours"
     round2_components_key: str = "round2_components"
     round2_component_doses_key: str = "round2_doses"
     round2_component_dose_units_key: str = "round2_dose_units"
+    round2_component_durations_key: str = "round2_durations_hours"
     component_key: str = "treatment_components"
     component_dose_key: str = "treatment_component_doses"
     component_dose_unit_key: str = "treatment_component_dose_units"
+    component_duration_key: str = "treatment_component_durations_hours"
     max_components: int = 4
     use_component_interactions: bool = True
     treatment_role_key: str = "treatment_role"
@@ -93,6 +96,10 @@ class RegenAIPTConfig:
     perturbation_adversarial_weight: float = 0.5
     embedding_l2_weight: float = 1e-4
     dose_regularization_weight: float = 0.1
+    duration_regularization_weight: float = 0.1
+    de_loss_weight: float = 0.0
+    delta_loss_weight: float = 0.0
+    delta_context_keys: tuple[str, ...] = ("iPSC_line", "round1_treatment")
     random_seed: int = 0
     device: Literal["auto", "cpu", "cuda"] = "auto"
 
@@ -143,6 +150,12 @@ class RegenAIPTConfig:
             raise ValueError("embedding_l2_weight must be non-negative")
         if self.dose_regularization_weight < 0.0:
             raise ValueError("dose_regularization_weight must be non-negative")
+        if self.duration_regularization_weight < 0.0:
+            raise ValueError("duration_regularization_weight must be non-negative")
+        if self.de_loss_weight < 0.0:
+            raise ValueError("de_loss_weight must be non-negative")
+        if self.delta_loss_weight < 0.0:
+            raise ValueError("delta_loss_weight must be non-negative")
         if not self.treatment_key:
             raise ValueError("treatment_key must be a non-empty string")
         if not self.control_treatment:
@@ -150,6 +163,9 @@ class RegenAIPTConfig:
         if self.max_components <= 0:
             raise ValueError("max_components must be positive")
         self.covariate_keys = tuple(key for key in self.covariate_keys if key)
+        self.delta_context_keys = tuple(
+            key for key in self.delta_context_keys if key
+        )
 
 @dataclass(slots=True)
 class RegenAIPTValidationReport:
@@ -283,6 +299,54 @@ def validate_regenai_pt_adata(adata: ad.AnnData, config: RegenAIPTConfig) -> Reg
                     f"Row {idx} has mismatched component/dose lengths in '{config.component_key}' and '{config.component_dose_key}'"
                 )
                 break
+
+    if has_components and config.component_duration_key in obs.columns:
+        missing_duration_rows = 0
+        for idx, (raw_components, raw_durations) in enumerate(
+            zip(
+                obs[config.component_key].tolist(),
+                obs[config.component_duration_key].tolist(),
+                strict=False,
+            )
+        ):
+            components = _parse_component_like_value(raw_components)
+            durations = _parse_component_like_value(raw_durations)
+            if durations and len(durations) != len(components):
+                report.errors.append(
+                    f"Row {idx} has mismatched component/duration lengths in "
+                    f"'{config.component_key}' and '{config.component_duration_key}'"
+                )
+                break
+            known_durations = [
+                value
+                for value in durations
+                if value.strip().lower() not in {"", "na", "nan", "none", "null"}
+            ]
+            if not known_durations:
+                missing_duration_rows += 1
+            else:
+                try:
+                    numeric_durations = [float(value) for value in known_durations]
+                except ValueError:
+                    report.errors.append(
+                        f"Row {idx} contains non-numeric treatment duration values"
+                    )
+                    break
+                if any(value < 0.0 for value in numeric_durations):
+                    report.errors.append(
+                        f"Row {idx} contains negative treatment duration values"
+                    )
+                    break
+        if missing_duration_rows:
+            report.warnings.append(
+                f"Treatment duration is missing for {missing_duration_rows} rows; "
+                "duration effects will be masked for those observations"
+            )
+    elif has_components:
+        report.warnings.append(
+            f"Optional adata.obs column '{config.component_duration_key}' is missing; "
+            "duration effects will be disabled for these observations"
+        )
 
     if matrix is not None:
         shape = getattr(matrix, "shape", None)

@@ -86,6 +86,14 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument('--early-stopping-patience', type=int, default=15)
     train.add_argument('--gradient-clip-norm', type=float, default=5.0)
     train.add_argument('--n-de-genes', type=int, default=100)
+    train.add_argument('--de-loss-weight', type=float, default=0.0)
+    train.add_argument('--delta-loss-weight', type=float, default=0.0)
+    train.add_argument('--duration-regularization-weight', type=float, default=0.1)
+    train.add_argument(
+        '--delta-context-keys',
+        default='iPSC_line,round1_treatment',
+        help='Comma-separated covariates used to match control and treated population deltas',
+    )
     train.add_argument('--cell-type-key', default='time_point')
     train.add_argument('--reconstruction-loss', choices=['mse', 'nb', 'zinb'], default='mse')
     train.add_argument('--warmup-epochs', type=int, default=20)
@@ -99,6 +107,7 @@ def _build_parser() -> argparse.ArgumentParser:
     predict_transition.add_argument('--adata', required=True)
     predict_transition.add_argument('--treatment', required=True)
     predict_transition.add_argument('--dose', type=float)
+    predict_transition.add_argument('--duration-hours', type=float)
     predict_transition.add_argument('--output-dir', required=True)
 
     simulate_sequence = sub.add_parser('simulate-sequence', help='Simulate two-step RegenAI-PT sequence')
@@ -106,8 +115,10 @@ def _build_parser() -> argparse.ArgumentParser:
     simulate_sequence.add_argument('--adata', required=True)
     simulate_sequence.add_argument('--round1-treatment', required=True)
     simulate_sequence.add_argument('--round1-dose', type=float)
+    simulate_sequence.add_argument('--round1-duration-hours', type=float)
     simulate_sequence.add_argument('--round2-treatment', required=True)
     simulate_sequence.add_argument('--round2-dose', type=float)
+    simulate_sequence.add_argument('--round2-duration-hours', type=float)
     simulate_sequence.add_argument('--output-dir', required=True)
 
     plot_cells = sub.add_parser('plot-cell-latent', help='Plot RegenAI-PT basal cell-state latent space')
@@ -240,17 +251,18 @@ def _predict_transition_command(args: argparse.Namespace) -> int:
         if predictor_type == 'adapter':
             prediction = predictor.predict_expression(
                 adata,
-                {'round1_treatment': args.treatment, 'round1_dose': args.dose, 'dose': args.dose, 'round_number': 1},
+                {'round1_treatment': args.treatment, 'round1_dose': args.dose, 'dose': args.dose, 'round1_durations_hours': args.duration_hours, 'round_number': 1},
             )
             predicted_state = predictor.predict(
                 adata,
-                {'round1_treatment': args.treatment, 'round1_dose': args.dose, 'dose': args.dose, 'round_number': 1},
+                {'round1_treatment': args.treatment, 'round1_dose': args.dose, 'dose': args.dose, 'round1_durations_hours': args.duration_hours, 'round_number': 1},
             )
             summary = {
                 'mode': 'predict-transition',
                 'predictor_type': predictor_type,
                 'treatment': args.treatment,
                 'dose': args.dose,
+                'duration_hours': args.duration_hours,
                 'n_cells': int(adata.n_obs),
                 'n_genes': int(adata.n_vars),
                 'predicted_stage': predicted_state.stage,
@@ -259,12 +271,18 @@ def _predict_transition_command(args: argparse.Namespace) -> int:
                 'mean_dose_scale': float(np.asarray(prediction['dose_scale']).mean()),
             }
         else:
-            prediction = predictor.predict_adata(adata, treatment=args.treatment, dose=args.dose)
+            prediction = predictor.predict_adata(
+                adata,
+                treatment=args.treatment,
+                dose=args.dose,
+                duration=args.duration_hours,
+            )
             summary = {
                 'mode': 'predict-transition',
                 'predictor_type': predictor_type,
                 'treatment': args.treatment,
                 'dose': args.dose,
+                'duration_hours': args.duration_hours,
                 'n_cells': int(adata.n_obs),
                 'n_genes': int(adata.n_vars),
                 'mean_dose_scale': float(np.asarray(prediction['dose_scale']).mean()),
@@ -286,6 +304,7 @@ def _predict_transition_command(args: argparse.Namespace) -> int:
         report_lines=[
             f'- Treatment: {args.treatment}',
             f'- Dose: {args.dose}',
+            f'- Duration hours: {args.duration_hours}',
             f'- Cells: {adata.n_obs}',
             f'- Genes: {adata.n_vars}',
             f'- Predictor Type: {predictor_type}',
@@ -309,8 +328,10 @@ def _simulate_sequence_command(args: argparse.Namespace) -> int:
             {
                 'round1_treatment': args.round1_treatment,
                 'round1_dose': args.round1_dose,
+                'round1_durations_hours': args.round1_duration_hours,
                 'round2_treatment': args.round2_treatment,
                 'round2_dose': args.round2_dose,
+                'round2_durations_hours': args.round2_duration_hours,
             },
         )
     except KeyError as exc:
@@ -322,8 +343,10 @@ def _simulate_sequence_command(args: argparse.Namespace) -> int:
         'predictor_type': predictor_type,
         'round1_treatment': args.round1_treatment,
         'round1_dose': args.round1_dose,
+        'round1_duration_hours': args.round1_duration_hours,
         'round2_treatment': args.round2_treatment,
         'round2_dose': args.round2_dose,
+        'round2_duration_hours': args.round2_duration_hours,
         'n_cells': int(adata.n_obs),
         'n_genes': int(adata.n_vars),
     }
@@ -473,6 +496,7 @@ def main(argv: list[str] | None = None) -> int:
                         lr_scheduler_patience=args.lr_scheduler_patience,
                         early_stopping_patience=args.early_stopping_patience,
                         n_de_genes=args.n_de_genes,
+                        duration_regularization_weight=args.duration_regularization_weight,
                         cell_type_key=args.cell_type_key,
                         dataset_metadata=ds,
                     )
@@ -515,6 +539,10 @@ def main(argv: list[str] | None = None) -> int:
                         'lr_scheduler_patience': args.lr_scheduler_patience,
                         'early_stopping_patience': args.early_stopping_patience,
                         'n_de_genes': args.n_de_genes,
+                        'de_loss_weight': args.de_loss_weight,
+                        'delta_loss_weight': args.delta_loss_weight,
+                        'duration_regularization_weight': args.duration_regularization_weight,
+                        'delta_context_keys': _parse_covariate_keys(args.delta_context_keys),
                         'cell_type_key': args.cell_type_key,
                         'reconstruction_loss': args.reconstruction_loss,
                         'warmup_epochs': args.warmup_epochs,

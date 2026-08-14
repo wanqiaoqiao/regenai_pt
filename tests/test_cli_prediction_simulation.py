@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import anndata as ad
@@ -126,6 +127,8 @@ def test_predict_transition_cli_works_if_torch_available(tmp_path: Path) -> None
             'A',
             '--dose',
             '10',
+            '--duration-hours',
+            '48',
             '--output-dir',
             str(output_dir),
         ]
@@ -136,6 +139,8 @@ def test_predict_transition_cli_works_if_torch_available(tmp_path: Path) -> None
     assert (output_dir / 'predicted_latent.csv').exists()
     assert (output_dir / 'prediction_summary.json').exists()
     assert (output_dir / 'simulation_report.md').exists()
+    summary = json.loads((output_dir / 'prediction_summary.json').read_text())
+    assert summary['duration_hours'] == 48.0
 
 
 def test_simulate_sequence_cli_works_if_torch_available(tmp_path: Path) -> None:
@@ -153,10 +158,14 @@ def test_simulate_sequence_cli_works_if_torch_available(tmp_path: Path) -> None:
             'A',
             '--round1-dose',
             '10',
+            '--round1-duration-hours',
+            '24',
             '--round2-treatment',
             'B',
             '--round2-dose',
             '5',
+            '--round2-duration-hours',
+            '72',
             '--output-dir',
             str(output_dir),
         ]
@@ -167,6 +176,9 @@ def test_simulate_sequence_cli_works_if_torch_available(tmp_path: Path) -> None:
     assert (output_dir / 'predicted_latent.csv').exists()
     assert (output_dir / 'prediction_summary.json').exists()
     assert (output_dir / 'simulation_report.md').exists()
+    summary = json.loads((output_dir / 'prediction_summary.json').read_text())
+    assert summary['round1_duration_hours'] == 24.0
+    assert summary['round2_duration_hours'] == 72.0
 
 
 def test_invalid_treatment_gives_clear_error_if_torch_available(tmp_path: Path) -> None:

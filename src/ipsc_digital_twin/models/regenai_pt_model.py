@@ -89,6 +89,8 @@ class RegenAIPTNet(nn.Module):
         self.component_embedding = nn.Embedding(self.n_components, n_latent)
         self.component_dose_a = nn.Embedding(self.n_components, 1)
         self.component_dose_b = nn.Embedding(self.n_components, 1)
+        self.component_duration_a = nn.Embedding(self.n_components, 1)
+        self.component_duration_b = nn.Embedding(self.n_components, 1)
         self.covariate_embeddings = nn.ModuleDict(
             {
                 key: nn.Embedding(num_embeddings=size, embedding_dim=n_latent)
@@ -125,6 +127,8 @@ class RegenAIPTNet(nn.Module):
         nn.init.normal_(self.component_embedding.weight, mean=0.0, std=0.02)
         nn.init.zeros_(self.component_dose_a.weight)
         nn.init.zeros_(self.component_dose_b.weight)
+        nn.init.zeros_(self.component_duration_a.weight)
+        nn.init.zeros_(self.component_duration_b.weight)
         for key in self.covariate_embeddings:
             embedding = self.covariate_embeddings[key]
             assert isinstance(embedding, nn.Embedding)
@@ -159,40 +163,76 @@ class RegenAIPTNet(nn.Module):
         b = self.component_dose_b(component_ids)
         return torch.sigmoid(a * log_dose + b)
 
+    def _compute_component_duration_scale(
+        self,
+        component_ids: torch.Tensor,
+        component_durations: torch.Tensor,
+        component_duration_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        duration = component_durations.float()
+        log_duration = torch.log1p(torch.clamp(duration, min=0.0)).unsqueeze(-1)
+        a = self.component_duration_a(component_ids)
+        b = self.component_duration_b(component_ids)
+        # A factor of two makes the zero-initialized duration branch neutral (1.0).
+        learned_scale = 2.0 * torch.sigmoid(a * log_duration + b)
+        known = component_duration_mask.float().unsqueeze(-1)
+        return (known * learned_scale) + (1.0 - known)
+
     def _normalize_component_inputs(
         self,
         *,
         component_ids: torch.Tensor | None,
         component_doses: torch.Tensor | None,
+        component_durations: torch.Tensor | None,
+        component_duration_mask: torch.Tensor | None,
         component_mask: torch.Tensor | None,
         treatment_id: torch.Tensor | None,
         dose: torch.Tensor | None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         if component_ids is None:
             if treatment_id is None:
                 raise ValueError("component_ids or treatment_id is required")
             component_ids = treatment_id.view(-1, 1)
             component_doses = (dose if dose is not None else torch.ones_like(treatment_id, dtype=torch.float32)).view(-1, 1)
             component_mask = torch.ones_like(component_doses, dtype=torch.float32)
+            component_durations = torch.zeros_like(component_doses, dtype=torch.float32)
+            component_duration_mask = torch.zeros_like(component_doses, dtype=torch.float32)
         else:
             if component_doses is None:
                 component_doses = torch.ones(component_ids.shape, device=component_ids.device, dtype=torch.float32)
             if component_mask is None:
                 component_mask = torch.ones(component_ids.shape, device=component_ids.device, dtype=torch.float32)
-        return component_ids.long(), component_doses.float(), component_mask.float()
+            if component_durations is None:
+                component_durations = torch.zeros(component_ids.shape, device=component_ids.device, dtype=torch.float32)
+            if component_duration_mask is None:
+                component_duration_mask = torch.zeros(component_ids.shape, device=component_ids.device, dtype=torch.float32)
+        return (
+            component_ids.long(),
+            component_doses.float(),
+            component_durations.float(),
+            component_duration_mask.float(),
+            component_mask.float(),
+        )
 
     def _compute_component_effect(
         self,
         component_ids: torch.Tensor,
         component_doses: torch.Tensor,
+        component_durations: torch.Tensor,
+        component_duration_mask: torch.Tensor,
         component_mask: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         component_embedding = self.component_embedding(component_ids)
         dose_scale = self._compute_component_dose_scale(component_ids=component_ids, component_doses=component_doses)
-        masked_scale = dose_scale * component_mask.unsqueeze(-1)
+        duration_scale = self._compute_component_duration_scale(
+            component_ids=component_ids,
+            component_durations=component_durations,
+            component_duration_mask=component_duration_mask,
+        )
+        masked_scale = dose_scale * duration_scale * component_mask.unsqueeze(-1)
         masked_effects = component_embedding * masked_scale
         perturbation_embedding = masked_effects.sum(dim=1)
-        return perturbation_embedding, component_embedding, dose_scale, masked_effects
+        return perturbation_embedding, component_embedding, dose_scale, duration_scale, masked_effects
 
     def _compute_interaction_effect(self, masked_effects: torch.Tensor, component_mask: torch.Tensor) -> torch.Tensor:
         if not self.use_component_interactions or masked_effects.shape[1] < 2:
@@ -217,18 +257,24 @@ class RegenAIPTNet(nn.Module):
         covariates: dict[str, torch.Tensor] | None = None,
         component_ids: torch.Tensor | None = None,
         component_doses: torch.Tensor | None = None,
+        component_durations: torch.Tensor | None = None,
+        component_duration_mask: torch.Tensor | None = None,
         component_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        component_ids, component_doses, component_mask = self._normalize_component_inputs(
+        component_ids, component_doses, component_durations, component_duration_mask, component_mask = self._normalize_component_inputs(
             component_ids=component_ids,
             component_doses=component_doses,
+            component_durations=component_durations,
+            component_duration_mask=component_duration_mask,
             component_mask=component_mask,
             treatment_id=treatment_id,
             dose=dose,
         )
-        perturbation_embedding, _, dose_scale, masked_effects = self._compute_component_effect(
+        perturbation_embedding, _, dose_scale, _, masked_effects = self._compute_component_effect(
             component_ids=component_ids,
             component_doses=component_doses,
+            component_durations=component_durations,
+            component_duration_mask=component_duration_mask,
             component_mask=component_mask,
         )
         interaction_effect = self._compute_interaction_effect(masked_effects, component_mask)
@@ -247,6 +293,8 @@ class RegenAIPTNet(nn.Module):
         covariates: dict[str, torch.Tensor] | None = None,
         component_ids: torch.Tensor | None = None,
         component_doses: torch.Tensor | None = None,
+        component_durations: torch.Tensor | None = None,
+        component_duration_mask: torch.Tensor | None = None,
         component_mask: torch.Tensor | None = None,
     ) -> dict[str, Any]:
         z_basal = self.encode(x)
@@ -257,11 +305,15 @@ class RegenAIPTNet(nn.Module):
             covariates=covariates,
             component_ids=component_ids,
             component_doses=component_doses,
+            component_durations=component_durations,
+            component_duration_mask=component_duration_mask,
             component_mask=component_mask,
         )
-        normalized_ids, normalized_doses, _ = self._normalize_component_inputs(
+        normalized_ids, normalized_doses, normalized_durations, normalized_duration_mask, _ = self._normalize_component_inputs(
             component_ids=component_ids,
             component_doses=component_doses,
+            component_durations=component_durations,
+            component_duration_mask=component_duration_mask,
             component_mask=component_mask,
             treatment_id=treatment_id,
             dose=dose,
@@ -269,6 +321,11 @@ class RegenAIPTNet(nn.Module):
         component_dose_scale = self._compute_component_dose_scale(
             component_ids=normalized_ids,
             component_doses=normalized_doses,
+        ).squeeze(-1)
+        component_duration_scale = self._compute_component_duration_scale(
+            component_ids=normalized_ids,
+            component_durations=normalized_durations,
+            component_duration_mask=normalized_duration_mask,
         ).squeeze(-1)
         z_adv = self.gradient_reversal(z_basal)
         treatment_logits_adv = self.treatment_classifier(z_adv)
@@ -280,6 +337,7 @@ class RegenAIPTNet(nn.Module):
             "perturbation_embedding": perturbation_embedding,
             "dose_scale": dose_scale,
             "component_dose_scale": component_dose_scale,
+            "component_duration_scale": component_duration_scale,
             "treatment_logits_adv": treatment_logits_adv,
             "covariate_logits_adv": covariate_logits_adv,
         }
@@ -293,6 +351,8 @@ class RegenAIPTNet(nn.Module):
         covariates: dict[str, torch.Tensor] | None = None,
         component_ids: torch.Tensor | None = None,
         component_doses: torch.Tensor | None = None,
+        component_durations: torch.Tensor | None = None,
+        component_duration_mask: torch.Tensor | None = None,
         component_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         outputs = self.forward(
@@ -302,6 +362,8 @@ class RegenAIPTNet(nn.Module):
             covariates=covariates,
             component_ids=component_ids,
             component_doses=component_doses,
+            component_durations=component_durations,
+            component_duration_mask=component_duration_mask,
             component_mask=component_mask,
         )
         return outputs["x_hat"]

@@ -6,7 +6,6 @@ from pathlib import Path
 import anndata as ad
 import numpy as np
 
-
 DATA_DIR = Path("/Users/qiaoqiaowan/Desktop/iPSC/AI_iPSC_differentiation/Perterbation_predictor/Production/sample_data/h5ad_2026_07")
 OUTPUT_PATH = Path(
     "/Users/qiaoqiaowan/Desktop/iPSC/AI_iPSC_differentiation/Perterbation_predictor/Production/sample_data/prepared_h5ad_2026_07/combined_regenai_pt_training_input.h5ad"
@@ -15,8 +14,10 @@ OUTPUT_PATH = Path(
 HELD_OUT_SAMPLE = "GSM4876138"
 RANDOM_SEED = 42
 
-# Replace treatment placeholders with exact components, doses, and units
-# from the experimental protocols.
+# Replace treatment placeholders with exact components, doses, units, and
+# exposure windows from the experimental protocols. The durations below assume
+# continuous exposure across each labeled differentiation interval and must be
+# confirmed against the wet-lab protocol before duration-aware training.
 SAMPLES = [
     {
         "sample_id": "GSM7147764",
@@ -29,9 +30,11 @@ SAMPLES = [
         "round1_components": ["control"],
         "round1_doses": [0.0],
         "round1_dose_units": ["none"],
+        "round1_durations_hours": [0.0],
         "round2_components": ["control"],
         "round2_doses": [0.0],
         "round2_dose_units": ["none"],
+        "round2_durations_hours": [0.0],
     },
     {
         "sample_id": "GSM7147766",
@@ -44,9 +47,11 @@ SAMPLES = [
         "round1_components": ["A"],
         "round1_doses": [5.0],
         "round1_dose_units": ["uM"],
+        "round1_durations_hours": [192.0],
         "round2_components": ["control"],
         "round2_doses": [0.0],
         "round2_dose_units": ["none"],
+        "round2_durations_hours": [0.0],
     },
     {
         "sample_id": "GSM7147768",
@@ -59,9 +64,11 @@ SAMPLES = [
         "round1_components": ["A"],
         "round1_doses": [5.0],
         "round1_dose_units": ["uM"],
+        "round1_durations_hours": [192.0],
         "round2_components": ["B"],
         "round2_doses": [5.0],
         "round2_dose_units": ["uM"],
+        "round2_durations_hours": [576.0],
     },
     {
         "sample_id": "GSM7147769",
@@ -74,9 +81,11 @@ SAMPLES = [
         "round1_components": ["A"],
         "round1_doses": [5.0],
         "round1_dose_units": ["uM"],
+        "round1_durations_hours": [192.0],
         "round2_components": ["B","C59"],
         "round2_doses": [5.0,5.0],
         "round2_dose_units": ["uM","uM"],
+        "round2_durations_hours": [576.0,576.0],
     },
     {
         "sample_id": "GSM4876130",
@@ -89,9 +98,11 @@ SAMPLES = [
         "round1_components": ["control"],
         "round1_doses": [0.0],
         "round1_dose_units": ["none"],
+        "round1_durations_hours": [0.0],
         "round2_components": ["control"],
         "round2_doses": [0.0],
         "round2_dose_units": ["none"],
+        "round2_durations_hours": [0.0],
     },
     {
         "sample_id": "GSM4876132",
@@ -104,9 +115,11 @@ SAMPLES = [
         "round1_components": ["C"],
         "round1_doses": [5.0],
         "round1_dose_units": ["uM"],
+        "round1_durations_hours": [168.0],
         "round2_components": ["control"],
         "round2_doses": [0.0],
         "round2_dose_units": ["none"],
+        "round2_durations_hours": [0.0],
     },
     {
         "sample_id": "GSM4876134",
@@ -119,9 +132,11 @@ SAMPLES = [
         "round1_components": ["C"],
         "round1_doses": [5.0],
         "round1_dose_units": ["uM"],
+        "round1_durations_hours": [168.0],
         "round2_components": ["D"],
         "round2_doses": [5.0],
         "round2_dose_units": ["uM"],
+        "round2_durations_hours": [504.0],
     },
     {
         "sample_id": "GSM4876136",
@@ -134,9 +149,11 @@ SAMPLES = [
         "round1_components": ["C","C59"],
         "round1_doses": [5.0, 5.0],
         "round1_dose_units": ["uM","uM"],
+        "round1_durations_hours": [168.0,168.0],
         "round2_components": ["control"],
         "round2_doses": [0.0],
         "round2_dose_units": ["none"],
+        "round2_durations_hours": [0.0],
     },
     {
         "sample_id": "GSM4876138",
@@ -149,9 +166,11 @@ SAMPLES = [
         "round1_components": ["C","C59"],
         "round1_doses": [5.0,5.0],
         "round1_dose_units": ["uM","uM"],
+        "round1_durations_hours": [168.0,168.0],
         "round2_components": ["D","C59"],
         "round2_doses": [5.0,5.0],
         "round2_dose_units": ["uM","uM"],
+        "round2_durations_hours": [504.0,504.0],
     },
     # Add the remaining samples using the metadata table above.
 ]
@@ -185,16 +204,20 @@ def annotate_sample(adata: ad.AnnData, metadata: dict[str, object]) -> ad.AnnDat
         components = metadata[f"round{round_number}_components"]
         doses = metadata[f"round{round_number}_doses"]
         units = metadata[f"round{round_number}_dose_units"]
+        durations = metadata[f"round{round_number}_durations_hours"]
 
-        if not (len(components) == len(doses) == len(units)):
+        if not (len(components) == len(doses) == len(units) == len(durations)):
             raise ValueError(
                 f"{sample_id}: round {round_number} component, dose, "
-                "and unit lengths differ"
+                "unit, and duration lengths differ"
             )
+        if any(float(value) < 0.0 for value in durations):
+            raise ValueError(f"{sample_id}: treatment durations must be non-negative")
 
         adata.obs[f"round{round_number}_components"] = as_json(components)
         adata.obs[f"round{round_number}_doses"] = as_json(doses)
         adata.obs[f"round{round_number}_dose_units"] = as_json(units)
+        adata.obs[f"round{round_number}_durations_hours"] = as_json(durations)
         adata.obs[f"round{round_number}_treatment"] = "+".join(components)
         adata.obs[f"round{round_number}_dose"] = float(sum(doses))
 

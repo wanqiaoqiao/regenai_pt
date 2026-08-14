@@ -60,10 +60,13 @@ def test_regenai_pt_trainer_fit_encode_predict_and_save_load_if_torch_available(
     assert trainer.epochs_trained >= 1
     loss_components = (
         "reconstruction_loss",
+        "de_reconstruction_loss",
+        "delta_loss",
         "treatment_adv_loss",
         "covariate_adv_loss",
         "embedding_l2_loss",
         "dose_regularization_loss",
+        "duration_regularization_loss",
         "total_loss",
     )
     for split in ("train", "val"):
@@ -95,11 +98,15 @@ def test_regenai_pt_trainer_fit_encode_predict_and_save_load_if_torch_available(
     z = trainer.encode_adata(adata)
     assert z.shape == (adata.n_obs, config.n_latent)
 
-    preds = trainer.predict_adata(adata, treatment="A", dose=1.5)
+    preds = trainer.predict_adata(adata, treatment="A", dose=1.5, duration=48.0)
     assert preds["x_hat"].shape == (adata.n_obs, adata.n_vars)
     assert preds["z_basal"].shape == (adata.n_obs, config.n_latent)
     assert preds["z_total"].shape == (adata.n_obs, config.n_latent)
     assert preds["dose_scale"].shape == (adata.n_obs, 1)
+    assert preds["component_duration_scale"].shape == (
+        adata.n_obs,
+        config.max_components,
+    )
 
     save_path = tmp_path / "trainer.pt"
     trainer.save(save_path)
@@ -115,6 +122,32 @@ def test_regenai_pt_trainer_fit_encode_predict_and_save_load_if_torch_available(
 
     preds_loaded = loaded.predict_adata(adata, treatment="A", dose=1.5)
     assert preds_loaded["x_hat"].shape == preds["x_hat"].shape
+
+
+def test_trainer_logs_de_and_matched_delta_losses_if_torch_available() -> None:
+    pytest.importorskip("torch")
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
+    from ipsc_digital_twin.models.regenai_pt_trainer import RegenAIPTTrainer
+
+    adata = _make_mock_adata(n_cells=36)
+    trainer = RegenAIPTTrainer(
+        RegenAIPTConfig(
+            input_layer="raw_counts",
+            n_latent=4,
+            n_hidden=8,
+            max_epochs=1,
+            batch_size=36,
+            de_loss_weight=1.0,
+            delta_loss_weight=1.0,
+            delta_context_keys=(),
+            device="cpu",
+        )
+    ).fit(adata)
+
+    assert np.isfinite(trainer.history["train_de_reconstruction_loss"]).all()
+    assert np.isfinite(trainer.history["train_delta_loss"]).all()
+    assert trainer.history["train_de_reconstruction_loss"][0] > 0.0
+    assert trainer.history["train_delta_loss"][0] > 0.0
 
 
 def test_adversarial_warmup_and_ramp_schedule_if_torch_available() -> None:

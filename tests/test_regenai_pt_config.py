@@ -50,6 +50,13 @@ def test_regenai_pt_config_defaults_work() -> None:
     assert config.gradient_clip_norm == 5.0
     assert config.n_de_genes == 100
     assert config.cell_type_key == "time_point"
+    assert config.de_loss_weight == 0.0
+    assert config.delta_loss_weight == 0.0
+    assert config.delta_context_keys == ("iPSC_line", "round1_treatment")
+    assert config.round1_component_durations_key == "round1_durations_hours"
+    assert config.round2_component_durations_key == "round2_durations_hours"
+    assert config.component_duration_key == "treatment_component_durations_hours"
+    assert config.duration_regularization_weight == 0.1
 
 
 def test_regenai_pt_config_rejects_invalid_lr_scheduler_settings() -> None:
@@ -94,6 +101,12 @@ def test_regenai_pt_config_rejects_invalid_extended_metric_settings() -> None:
         RegenAIPTConfig(n_de_genes=0)
     with np.testing.assert_raises_regex(ValueError, "cell_type_key must be a non-empty string"):
         RegenAIPTConfig(cell_type_key="")
+    with np.testing.assert_raises_regex(ValueError, "de_loss_weight must be non-negative"):
+        RegenAIPTConfig(de_loss_weight=-1.0)
+    with np.testing.assert_raises_regex(ValueError, "delta_loss_weight must be non-negative"):
+        RegenAIPTConfig(delta_loss_weight=-1.0)
+    with np.testing.assert_raises_regex(ValueError, "duration_regularization_weight must be non-negative"):
+        RegenAIPTConfig(duration_regularization_weight=-1.0)
 
 
 def test_validate_regenai_pt_adata_missing_treatment_key_fails_clearly() -> None:

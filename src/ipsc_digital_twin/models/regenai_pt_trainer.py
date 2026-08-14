@@ -33,10 +33,13 @@ LOGGER = logging.getLogger(__name__)
 
 LOSS_COMPONENTS = (
     "reconstruction_loss",
+    "de_reconstruction_loss",
+    "delta_loss",
     "treatment_adv_loss",
     "covariate_adv_loss",
     "embedding_l2_loss",
     "dose_regularization_loss",
+    "duration_regularization_loss",
     "total_loss",
 )
 
@@ -102,12 +105,16 @@ class RegenAIPTTrainer:
             "dose_value": batch["dose_value"].to(self.device),
             "component_ids": batch["component_ids"].to(self.device),
             "component_doses": batch["component_doses"].to(self.device),
+            "component_durations": batch["component_durations"].to(self.device),
+            "component_duration_mask": batch["component_duration_mask"].to(self.device),
             "component_mask": batch["component_mask"].to(self.device),
             "covariate_ids": {key: value.to(self.device) for key, value in batch.get("covariate_ids", {}).items()},
             "round_id": batch["round_id"].to(self.device),
             "time_id": batch["time_id"].to(self.device),
             "batch_id": batch["batch_id"].to(self.device),
             "sample_weight": batch["sample_weight"].to(self.device),
+            "delta_target": batch["delta_target"].to(self.device),
+            "delta_mask": batch["delta_mask"].to(self.device),
         }
 
     def adversarial_weight_for_epoch(self, epoch_index: int) -> float:
@@ -148,6 +155,55 @@ class RegenAIPTTrainer:
             for metric in self._extended_metric_names():
                 self.history.setdefault(f"{split}_{metric}", [])
 
+    def _initialize_delta_targets(self, data_bundle: Any) -> None:
+        """Build population deltas from the training split and share them read-only."""
+        if self.mappings is None:
+            raise RuntimeError("Mappings must be initialized before delta targets")
+        train_dataset = data_bundle.train_dataset
+        control_id = self.mappings.treatment_to_id[self.config.control_treatment]
+        context_keys = tuple(
+            key
+            for key in self.config.delta_context_keys
+            if key in train_dataset.covariate_ids
+        )
+        groups: dict[tuple[int, tuple[int, ...]], list[int]] = {}
+        for row_idx, treatment_id in enumerate(train_dataset.treatment_ids):
+            context = tuple(
+                int(train_dataset.covariate_ids[key][row_idx])
+                for key in context_keys
+            )
+            groups.setdefault((int(treatment_id), context), []).append(row_idx)
+
+        def group_mean(indices: list[int]) -> np.ndarray:
+            total = np.zeros(train_dataset.expression.shape[1], dtype=np.float64)
+            for start in range(0, len(indices), 1024):
+                total += np.asarray(
+                    train_dataset.expression[indices[start : start + 1024]].sum(
+                        axis=0,
+                        dtype=np.float64,
+                    )
+                ).ravel()
+            return (total / len(indices)).astype(np.float32)
+
+        control_means = {
+            context: group_mean(indices)
+            for (treatment_id, context), indices in groups.items()
+            if treatment_id == control_id
+        }
+        lookup: dict[tuple[int, tuple[int, ...]], np.ndarray] = {}
+        for (treatment_id, context), indices in groups.items():
+            if treatment_id == control_id or context not in control_means:
+                continue
+            lookup[(treatment_id, context)] = (
+                group_mean(indices) - control_means[context]
+            )
+        for dataset in (
+            data_bundle.train_dataset,
+            data_bundle.val_dataset,
+            data_bundle.test_dataset,
+        ):
+            dataset.configure_delta_targets(lookup, context_keys)
+
     def _extended_metric_names(self) -> tuple[str, ...]:
         covariate_metrics: tuple[str, ...] = ()
         if self.mappings is not None:
@@ -183,6 +239,8 @@ class RegenAIPTTrainer:
             )
         component_ids = torch.full_like(batch["component_ids"], control_component_id)
         component_doses = torch.zeros_like(batch["component_doses"])
+        component_durations = torch.zeros_like(batch["component_durations"])
+        component_duration_mask = torch.ones_like(batch["component_duration_mask"])
         component_mask = torch.zeros_like(batch["component_mask"])
         component_mask[:, 0] = 1.0
         x_control, _, _, _ = self.model.decode(
@@ -190,6 +248,8 @@ class RegenAIPTTrainer:
             covariates=batch["covariate_ids"],
             component_ids=component_ids,
             component_doses=component_doses,
+            component_durations=component_durations,
+            component_duration_mask=component_duration_mask,
             component_mask=component_mask,
         )
         return x_control
@@ -203,6 +263,8 @@ class RegenAIPTTrainer:
         self.mappings = data_bundle.mappings
         self.model = self._initialize_model(self.mappings)
         self._initialize_extended_metrics(data_bundle.train_dataset)
+        if self.config.delta_loss_weight > 0.0:
+            self._initialize_delta_targets(data_bundle)
         optimizer = AdamW(self.model.parameters(), lr=self.config.learning_rate, weight_decay=self.config.weight_decay)
         lr_scheduler = self._initialize_lr_scheduler(optimizer)
 
@@ -298,14 +360,22 @@ class RegenAIPTTrainer:
                 covariates=batch["covariate_ids"],
                 component_ids=batch["component_ids"],
                 component_doses=batch["component_doses"],
+                component_durations=batch["component_durations"],
+                component_duration_mask=batch["component_duration_mask"],
                 component_mask=batch["component_mask"],
             )
+            if self.config.delta_loss_weight > 0.0:
+                outputs["x_hat_control"] = self._control_counterfactual_expression(
+                    batch,
+                    outputs,
+                )
             loss_dict = compute_regenai_pt_loss(
                 outputs=outputs,
                 batch=batch,
                 model=self.model,
                 config=self.config,
                 active_adversarial_weight=active_adversarial_weight,
+                de_gene_indices=self.de_gene_indices,
             )
             loss_dict["total_loss"].backward()
             torch.nn.utils.clip_grad_norm_(
@@ -348,6 +418,8 @@ class RegenAIPTTrainer:
                 covariates=batch["covariate_ids"],
                 component_ids=batch["component_ids"],
                 component_doses=batch["component_doses"],
+                component_durations=batch["component_durations"],
+                component_duration_mask=batch["component_duration_mask"],
                 component_mask=batch["component_mask"],
             )
             outputs["x_hat_control"] = self._control_counterfactual_expression(
@@ -360,6 +432,7 @@ class RegenAIPTTrainer:
                 model=self.model,
                 config=self.config,
                 active_adversarial_weight=active_adversarial_weight,
+                de_gene_indices=self.de_gene_indices,
             )
             for key in accum:
                 accum[key] += float(loss_dict[key].detach().cpu().item())
@@ -446,18 +519,63 @@ class RegenAIPTTrainer:
             doses = [[float(value) for value in row] for row in dose]
         return components, doses
 
-    def _encode_components_for_prediction(self, treatment: Any, dose: Any, n_obs: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _normalize_duration_spec(
+        self,
+        duration: Any,
+        components: list[list[str]],
+        n_obs: int,
+    ) -> tuple[list[list[float]], list[list[float]]]:
+        if duration is None:
+            return (
+                [[0.0] * len(row) for row in components],
+                [[0.0] * len(row) for row in components],
+            )
+        if np.isscalar(duration):
+            value = float(cast(float | int | str, duration))
+            durations = [[value] * len(row) for row in components]
+        elif isinstance(duration, (list, tuple)) and duration and all(np.isscalar(item) for item in duration):
+            values = [float(item) for item in duration]
+            if len(values) == len(components[0]):
+                durations = [values[:] for _ in range(n_obs)]
+            else:
+                durations = [[values[idx]] * len(row) for idx, row in enumerate(components)]
+        else:
+            durations = [[float(value) for value in row] for row in duration]
+        if any(value < 0.0 for row in durations for value in row if np.isfinite(value)):
+            raise ValueError("Treatment durations must be non-negative")
+        masks = [[1.0 if np.isfinite(value) else 0.0 for value in row] for row in durations]
+        clean = [[float(value) if np.isfinite(value) else 0.0 for value in row] for row in durations]
+        return clean, masks
+
+    def _encode_components_for_prediction(
+        self,
+        treatment: Any,
+        dose: Any,
+        duration: Any,
+        n_obs: int,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         assert self.mappings is not None
         component_rows, dose_rows = self._normalize_component_spec(treatment, dose, n_obs)
+        duration_rows, duration_mask_rows = self._normalize_duration_spec(
+            duration,
+            component_rows,
+            n_obs,
+        )
         component_ids = np.zeros((n_obs, self.config.max_components), dtype=np.int64)
         component_doses = np.zeros((n_obs, self.config.max_components), dtype=np.float32)
+        component_durations = np.zeros((n_obs, self.config.max_components), dtype=np.float32)
+        component_duration_mask = np.zeros((n_obs, self.config.max_components), dtype=np.float32)
         component_mask = np.zeros((n_obs, self.config.max_components), dtype=np.float32)
         treatment_labels: list[str] = []
-        for row_idx, (components, doses) in enumerate(zip(component_rows, dose_rows, strict=False)):
+        for row_idx, (components, doses, durations, duration_masks) in enumerate(
+            zip(component_rows, dose_rows, duration_rows, duration_mask_rows, strict=False)
+        ):
             treatment_labels.append('+'.join(components))
             for comp_idx, component in enumerate(components[: self.config.max_components]):
                 component_ids[row_idx, comp_idx] = self.mappings.component_to_id[str(component)]
                 component_doses[row_idx, comp_idx] = float(doses[comp_idx]) if comp_idx < len(doses) else 1.0
+                component_durations[row_idx, comp_idx] = float(durations[comp_idx]) if comp_idx < len(durations) else 0.0
+                component_duration_mask[row_idx, comp_idx] = float(duration_masks[comp_idx]) if comp_idx < len(duration_masks) else 0.0
                 component_mask[row_idx, comp_idx] = 1.0
         fallback_treatment_id = self.mappings.treatment_to_id.get(
             self.config.control_treatment,
@@ -472,6 +590,8 @@ class RegenAIPTTrainer:
             treatment_id,
             torch.as_tensor(component_ids, dtype=torch.long, device=self.device),
             torch.as_tensor(component_doses, dtype=torch.float32, device=self.device),
+            torch.as_tensor(component_durations, dtype=torch.float32, device=self.device),
+            torch.as_tensor(component_duration_mask, dtype=torch.float32, device=self.device),
             torch.as_tensor(component_mask, dtype=torch.float32, device=self.device),
         )
 
@@ -484,12 +604,24 @@ class RegenAIPTTrainer:
         return self.model.encode(x).detach().cpu().numpy()
 
     @torch.no_grad()
-    def predict_adata(self, adata: ad.AnnData, treatment: Any, dose: Any = None, covariates: dict[str, Any] | None = None) -> dict[str, np.ndarray]:
+    def predict_adata(
+        self,
+        adata: ad.AnnData,
+        treatment: Any,
+        dose: Any = None,
+        covariates: dict[str, Any] | None = None,
+        duration: Any = None,
+    ) -> dict[str, np.ndarray]:
         self._ensure_fitted()
         x_np = self._expression_from_adata(adata)
         n_obs = x_np.shape[0]
         x = torch.as_tensor(x_np, dtype=torch.float32, device=self.device)
-        treatment_id, component_ids, component_doses, component_mask = self._encode_components_for_prediction(treatment=treatment, dose=dose, n_obs=n_obs)
+        treatment_id, component_ids, component_doses, component_durations, component_duration_mask, component_mask = self._encode_components_for_prediction(
+            treatment=treatment,
+            dose=dose,
+            duration=duration,
+            n_obs=n_obs,
+        )
         covariate_ids = self._encode_covariates_for_prediction(n_obs=n_obs, adata=adata, covariates=covariates)
         assert self.model is not None
         self.model.eval()
@@ -500,6 +632,8 @@ class RegenAIPTTrainer:
             covariates=covariate_ids,
             component_ids=component_ids,
             component_doses=component_doses,
+            component_durations=component_durations,
+            component_duration_mask=component_duration_mask,
             component_mask=component_mask,
         )
         return {
@@ -508,6 +642,7 @@ class RegenAIPTTrainer:
             "z_total": outputs["z_total"].detach().cpu().numpy(),
             "dose_scale": outputs["dose_scale"].detach().cpu().numpy(),
             "component_dose_scale": outputs["component_dose_scale"].detach().cpu().numpy(),
+            "component_duration_scale": outputs["component_duration_scale"].detach().cpu().numpy(),
             "perturbation_embedding": outputs["perturbation_embedding"].detach().cpu().numpy(),
         }
 
@@ -536,7 +671,7 @@ class RegenAIPTTrainer:
         mappings = RegenAIPTMappings(**payload["mappings"])
         trainer.mappings = mappings
         trainer.model = trainer._initialize_model(mappings)
-        trainer.model.load_state_dict(payload["model_state_dict"])
+        trainer.model.load_state_dict(payload["model_state_dict"], strict=False)
         trainer.history.update(payload.get("history", {}))
         trainer.epochs_trained = int(payload.get("epochs_trained", 0))
         trainer.best_val_reconstruction_loss = payload.get("best_val_reconstruction_loss")

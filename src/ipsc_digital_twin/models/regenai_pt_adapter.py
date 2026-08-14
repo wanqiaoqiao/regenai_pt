@@ -158,6 +158,14 @@ class RegenAIPTForwardAdapter(ForwardTransitionModelInterface):
                 return float(value)
         return None
 
+    @staticmethod
+    def _resolve_duration(treatment_metadata: dict[str, Any], *keys: str) -> Any:
+        for key in keys:
+            value = treatment_metadata.get(key)
+            if value is not None and str(value) != '':
+                return value
+        return None
+
     def _choose_round(self, treatment_metadata: dict[str, Any]) -> int:
         if treatment_metadata.get('round2_treatment') not in (None, ''):
             return 2
@@ -217,6 +225,9 @@ class RegenAIPTForwardAdapter(ForwardTransitionModelInterface):
                 'expression': x_future,
                 'latent': z_total,
                 'dose_scale': np.asarray(prediction.get('dose_scale')),
+                'component_duration_scale': np.asarray(
+                    prediction.get('component_duration_scale')
+                ),
             },
         )
 
@@ -233,14 +244,38 @@ class RegenAIPTForwardAdapter(ForwardTransitionModelInterface):
                 raise RuntimeError('Round2 trainer is unavailable for sequential prediction')
             treatment = self._resolve_treatment_name(treatment_metadata, 'round2_components', 'round2_treatment', 'treatment_name', 'treatment')
             dose = self._resolve_dose(treatment_metadata, 'round2_dose', 'dose')
+            duration = self._resolve_duration(
+                treatment_metadata,
+                'round2_durations_hours',
+                'duration_hours',
+                'duration',
+            )
             if treatment_metadata.get('round1_treatment') is not None:
                 base_covariates['round1_treatment'] = str(treatment_metadata['round1_treatment'])
-            return self.round2_trainer.predict_adata(current_adata, treatment=treatment, dose=dose, covariates=base_covariates)
+            return self.round2_trainer.predict_adata(
+                current_adata,
+                treatment=treatment,
+                dose=dose,
+                covariates=base_covariates,
+                duration=duration,
+            )
 
         treatment = self._resolve_treatment_name(treatment_metadata, 'round1_components', 'round1_treatment', 'treatment_name', 'treatment')
         dose = self._resolve_dose(treatment_metadata, 'round1_dose', 'dose')
+        duration = self._resolve_duration(
+            treatment_metadata,
+            'round1_durations_hours',
+            'duration_hours',
+            'duration',
+        )
         assert self.round1_trainer is not None
-        return self.round1_trainer.predict_adata(current_adata, treatment=treatment, dose=dose, covariates=base_covariates)
+        return self.round1_trainer.predict_adata(
+            current_adata,
+            treatment=treatment,
+            dose=dose,
+            covariates=base_covariates,
+            duration=duration,
+        )
 
     def predict_latent(
         self,
@@ -252,6 +287,7 @@ class RegenAIPTForwardAdapter(ForwardTransitionModelInterface):
             'z_basal': prediction['z_basal'],
             'z_total': prediction['z_total'],
             'dose_scale': prediction['dose_scale'],
+            'component_duration_scale': prediction['component_duration_scale'],
             'perturbation_embedding': prediction['perturbation_embedding'],
         }
 
@@ -292,9 +328,13 @@ class RegenAIPTForwardAdapter(ForwardTransitionModelInterface):
 
         round1_dose = None
         round2_dose = None
+        round1_duration = None
+        round2_duration = None
         if isinstance(treatment_sequence, dict):
             round1_dose = treatment_sequence.get('round1_dose')
             round2_dose = treatment_sequence.get('round2_dose')
+            round1_duration = treatment_sequence.get('round1_durations_hours')
+            round2_duration = treatment_sequence.get('round2_durations_hours')
 
         sequence_prediction = simulate_two_round_sequence(
             {'round1': self.round1_trainer, 'round2': self.round2_trainer},
@@ -303,6 +343,8 @@ class RegenAIPTForwardAdapter(ForwardTransitionModelInterface):
             round2_treatment=round2_treatment,
             round1_dose=round1_dose,
             round2_dose=round2_dose,
+            round1_duration=round1_duration,
+            round2_duration=round2_duration,
             covariates=self._merge_covariates(state_metadata, covariates),
         )
         predicted_state = self._prediction_to_state(
@@ -388,7 +430,9 @@ class RegenAIPTForwardAdapter(ForwardTransitionModelInterface):
         mappings = RegenAIPTMappings(**payload['mappings'])
         trainer.mappings = mappings
         trainer.model = trainer._initialize_model(mappings)
-        trainer.model.load_state_dict(payload['model_state_dict'])
+        # Duration-response parameters are absent from pre-duration checkpoints.
+        # Their neutral initialization preserves legacy prediction behavior.
+        trainer.model.load_state_dict(payload['model_state_dict'], strict=False)
         trainer.history.update(payload.get('history', {}))
         trainer.epochs_trained = int(payload.get('epochs_trained', 0))
         trainer.best_val_reconstruction_loss = payload.get('best_val_reconstruction_loss')

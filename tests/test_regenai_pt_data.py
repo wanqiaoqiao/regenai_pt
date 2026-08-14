@@ -78,10 +78,15 @@ def test_dataset_and_dataloader_encoding_with_torch_if_available() -> None:
     assert isinstance(batch["x"], torch.Tensor)
     assert isinstance(batch["treatment_id"], torch.Tensor)
     assert isinstance(batch["dose_value"], torch.Tensor)
+    assert isinstance(batch["component_durations"], torch.Tensor)
+    assert isinstance(batch["component_duration_mask"], torch.Tensor)
     assert isinstance(batch["covariate_ids"], dict)
     assert "replicate" in batch["covariate_ids"]
     assert "sequencing_run" in batch["covariate_ids"]
     assert batch["dose_value"].dtype.is_floating_point
+    assert batch["delta_target"].shape[1] == 1
+    assert not batch["delta_mask"].any()
+    assert not batch["component_duration_mask"].any()
 
 
 def test_regenai_pt_dataset_length_equals_number_of_selected_cells_if_available() -> None:

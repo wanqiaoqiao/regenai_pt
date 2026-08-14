@@ -72,6 +72,60 @@ def _compute_dose_regularization_loss(model: Any, reference: torch.Tensor) -> to
     return torch.stack(penalties).mean() if penalties else _zero_tensor(reference)
 
 
+def _compute_duration_regularization_loss(model: Any, reference: torch.Tensor) -> torch.Tensor:
+    penalties = [
+        model.component_duration_a.weight.pow(2).mean(),
+        model.component_duration_b.weight.pow(2).mean(),
+    ]
+    return torch.stack(penalties).mean() if penalties else _zero_tensor(reference)
+
+
+def _compute_de_reconstruction_loss(
+    outputs: dict[str, Any],
+    batch: dict[str, Any],
+    de_gene_indices: dict[int, Any] | None,
+) -> torch.Tensor:
+    """Average treated-cell reconstruction MSE on training-derived DE genes."""
+    if not de_gene_indices:
+        return _zero_tensor(outputs["x_hat"])
+    treatment_ids = batch["treatment_id"].long()
+    losses: list[torch.Tensor] = []
+    for treatment_id, raw_indices in de_gene_indices.items():
+        cell_mask = treatment_ids == int(treatment_id)
+        if not torch.any(cell_mask):
+            continue
+        gene_indices = torch.as_tensor(
+            raw_indices,
+            dtype=torch.long,
+            device=outputs["x_hat"].device,
+        )
+        if gene_indices.numel() == 0:
+            continue
+        losses.append(
+            F.mse_loss(
+                outputs["x_hat"][cell_mask][:, gene_indices],
+                batch["x"].float()[cell_mask][:, gene_indices],
+            )
+        )
+    if not losses:
+        return _zero_tensor(outputs["x_hat"])
+    return torch.stack(losses).mean()
+
+
+def _compute_delta_loss(outputs: dict[str, Any], batch: dict[str, Any]) -> torch.Tensor:
+    """Match predicted treatment-control shifts to train-only population shifts."""
+    control_prediction = outputs.get("x_hat_control")
+    delta_target = batch.get("delta_target")
+    delta_mask = batch.get("delta_mask")
+    if control_prediction is None or delta_target is None or delta_mask is None:
+        return _zero_tensor(outputs["x_hat"])
+    active = delta_mask.bool()
+    if not torch.any(active):
+        return _zero_tensor(outputs["x_hat"])
+    predicted_delta = outputs["x_hat"][active] - control_prediction[active]
+    return F.mse_loss(predicted_delta, delta_target[active].float())
+
+
 
 def compute_regenai_pt_loss(
     outputs: dict[str, Any],
@@ -79,12 +133,23 @@ def compute_regenai_pt_loss(
     model: Any,
     config: RegenAIPTConfig,
     active_adversarial_weight: float | None = None,
+    de_gene_indices: dict[int, Any] | None = None,
 ) -> dict[str, torch.Tensor]:
     reconstruction_loss = _compute_reconstruction_loss(outputs=outputs, batch=batch, config=config)
     treatment_adv_loss = _compute_treatment_adv_loss(outputs=outputs, batch=batch)
     covariate_adv_loss = _compute_covariate_adv_loss(outputs=outputs, batch=batch)
     embedding_l2_loss = _compute_embedding_l2_loss(model=model, reference=reconstruction_loss)
     dose_regularization_loss = _compute_dose_regularization_loss(model=model, reference=reconstruction_loss)
+    duration_regularization_loss = _compute_duration_regularization_loss(
+        model=model,
+        reference=reconstruction_loss,
+    )
+    de_reconstruction_loss = _compute_de_reconstruction_loss(
+        outputs=outputs,
+        batch=batch,
+        de_gene_indices=de_gene_indices,
+    )
+    delta_loss = _compute_delta_loss(outputs=outputs, batch=batch)
 
     adversarial_weight = (
         config.adversarial_weight
@@ -103,6 +168,11 @@ def compute_regenai_pt_loss(
     )
     total_loss = total_loss + (config.embedding_l2_weight * embedding_l2_loss)
     total_loss = total_loss + (config.dose_regularization_weight * dose_regularization_loss)
+    total_loss = total_loss + (
+        config.duration_regularization_weight * duration_regularization_loss
+    )
+    total_loss = total_loss + (config.de_loss_weight * de_reconstruction_loss)
+    total_loss = total_loss + (config.delta_loss_weight * delta_loss)
 
     return {
         "total_loss": total_loss,
@@ -111,6 +181,9 @@ def compute_regenai_pt_loss(
         "covariate_adv_loss": covariate_adv_loss,
         "embedding_l2_loss": embedding_l2_loss,
         "dose_regularization_loss": dose_regularization_loss,
+        "duration_regularization_loss": duration_regularization_loss,
+        "de_reconstruction_loss": de_reconstruction_loss,
+        "delta_loss": delta_loss,
     }
 
 

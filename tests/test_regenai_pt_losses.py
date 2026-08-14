@@ -49,10 +49,13 @@ def test_regenai_pt_loss_components_if_torch_available() -> None:
     assert set(loss_dict) == {
         "total_loss",
         "reconstruction_loss",
+        "de_reconstruction_loss",
+        "delta_loss",
         "treatment_adv_loss",
         "covariate_adv_loss",
         "embedding_l2_loss",
         "dose_regularization_loss",
+        "duration_regularization_loss",
     }
     assert isinstance(loss_dict["total_loss"], torch.Tensor)
     assert loss_dict["total_loss"].ndim == 0
@@ -61,6 +64,60 @@ def test_regenai_pt_loss_components_if_torch_available() -> None:
     assert torch.isfinite(loss_dict["covariate_adv_loss"])
     assert torch.isfinite(loss_dict["embedding_l2_loss"])
     assert torch.isfinite(loss_dict["dose_regularization_loss"])
+    assert torch.isfinite(loss_dict["duration_regularization_loss"])
+    assert torch.isfinite(loss_dict["de_reconstruction_loss"])
+    assert torch.isfinite(loss_dict["delta_loss"])
+
+
+def test_de_and_delta_losses_contribute_with_configured_weights_if_torch_available() -> None:
+    torch = pytest.importorskip("torch")
+    from ipsc_digital_twin.models.regenai_pt_config import RegenAIPTConfig
+    from ipsc_digital_twin.models.regenai_pt_losses import compute_regenai_pt_loss
+    from ipsc_digital_twin.models.regenai_pt_model import RegenAIPTNet
+
+    model = RegenAIPTNet(input_dim=4, n_treatments=2, n_latent=3, n_hidden=6)
+    config = RegenAIPTConfig(
+        de_loss_weight=2.0,
+        delta_loss_weight=3.0,
+        embedding_l2_weight=0.0,
+        dose_regularization_weight=0.0,
+        duration_regularization_weight=0.0,
+    )
+    batch = {
+        "x": torch.tensor([[0.0, 0.0, 0.0, 0.0], [2.0, 3.0, 0.0, 0.0]]),
+        "treatment_id": torch.tensor([0, 1]),
+        "dose_value": torch.tensor([0.0, 1.0]),
+        "covariate_ids": {},
+        "delta_target": torch.tensor([[0.0] * 4, [1.0, 2.0, 0.0, 0.0]]),
+        "delta_mask": torch.tensor([False, True]),
+    }
+    outputs = model(
+        x=batch["x"],
+        treatment_id=batch["treatment_id"],
+        dose=batch["dose_value"],
+    )
+    outputs["x_hat"] = torch.tensor(
+        [[0.0, 0.0, 0.0, 0.0], [1.5, 2.0, 1.0, 1.0]],
+        requires_grad=True,
+    )
+    outputs["x_hat_control"] = torch.zeros_like(outputs["x_hat"])
+    losses = compute_regenai_pt_loss(
+        outputs,
+        batch,
+        model,
+        config,
+        active_adversarial_weight=0.0,
+        de_gene_indices={1: [0, 1]},
+    )
+
+    assert losses["de_reconstruction_loss"] > 0.0
+    assert losses["delta_loss"] > 0.0
+    expected = (
+        losses["reconstruction_loss"]
+        + 2.0 * losses["de_reconstruction_loss"]
+        + 3.0 * losses["delta_loss"]
+    )
+    assert torch.allclose(losses["total_loss"], expected)
 
 
 def test_reconstruction_loss_decreases_when_prediction_matches_input_if_torch_available() -> None:
@@ -131,6 +188,7 @@ def test_losses_remain_finite_without_covariates_if_torch_available() -> None:
     assert torch.isfinite(loss_dict["covariate_adv_loss"])
     assert torch.isfinite(loss_dict["embedding_l2_loss"])
     assert torch.isfinite(loss_dict["dose_regularization_loss"])
+    assert torch.isfinite(loss_dict["duration_regularization_loss"])
 
 
 def test_zero_active_adversarial_weight_excludes_adversarial_losses_if_torch_available() -> None:
@@ -143,6 +201,7 @@ def test_zero_active_adversarial_weight_excludes_adversarial_losses_if_torch_ava
     config = RegenAIPTConfig(
         embedding_l2_weight=0.0,
         dose_regularization_weight=0.0,
+        duration_regularization_weight=0.0,
     )
     batch = {
         "x": torch.randn(3, 5),

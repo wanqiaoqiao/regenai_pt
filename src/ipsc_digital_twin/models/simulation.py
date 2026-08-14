@@ -24,20 +24,30 @@ def _prediction_to_adata(prediction: dict[str, np.ndarray], template_adata: ad.A
 
 
 
-def simulate_round1(model: Any, current_adata: ad.AnnData, round1_treatment: Any, dose: Any = None, covariates: dict[str, Any] | None = None) -> dict[str, Any]:
+def simulate_round1(model: Any, current_adata: ad.AnnData, round1_treatment: Any, dose: Any = None, covariates: dict[str, Any] | None = None, duration: Any = None) -> dict[str, Any]:
     predictor = _ensure_predictor(model)
-    pred = predictor.predict_adata(current_adata, treatment=round1_treatment, dose=dose, covariates=covariates)
+    prediction_kwargs = {
+        'treatment': round1_treatment,
+        'dose': dose,
+        'covariates': covariates,
+    }
+    if duration is not None:
+        prediction_kwargs['duration'] = duration
+    pred = predictor.predict_adata(current_adata, **prediction_kwargs)
     predicted_adata = _prediction_to_adata(pred, current_adata)
     predicted_adata.obs['round'] = 1
     predicted_adata.obs['time_point'] = 'post_round1'
     predicted_adata.obs['round1_treatment'] = '+'.join(round1_treatment) if isinstance(round1_treatment, (list, tuple)) else str(round1_treatment)
     predicted_adata.obs['round1_components'] = [list(round1_treatment) if isinstance(round1_treatment, (list, tuple)) else [str(round1_treatment)]] * predicted_adata.n_obs
+    if duration is not None:
+        duration_values = list(duration) if isinstance(duration, (list, tuple)) else [float(duration)]
+        predicted_adata.obs['round1_durations_hours'] = [duration_values] * predicted_adata.n_obs
     pred['predicted_adata'] = predicted_adata
     return pred
 
 
 
-def simulate_round2(model: Any, post_round1_adata_or_prediction: Any, round2_treatment: Any, dose: Any = None, covariates: dict[str, Any] | None = None) -> dict[str, Any]:
+def simulate_round2(model: Any, post_round1_adata_or_prediction: Any, round2_treatment: Any, dose: Any = None, covariates: dict[str, Any] | None = None, duration: Any = None) -> dict[str, Any]:
     predictor = _ensure_predictor(model)
     if isinstance(post_round1_adata_or_prediction, ad.AnnData):
         post_round1_adata = post_round1_adata_or_prediction
@@ -45,12 +55,22 @@ def simulate_round2(model: Any, post_round1_adata_or_prediction: Any, round2_tre
         post_round1_adata = post_round1_adata_or_prediction['predicted_adata']
     else:
         raise TypeError('post_round1_adata_or_prediction must be an AnnData or round1 prediction payload')
-    pred = predictor.predict_adata(post_round1_adata, treatment=round2_treatment, dose=dose, covariates=covariates)
+    prediction_kwargs = {
+        'treatment': round2_treatment,
+        'dose': dose,
+        'covariates': covariates,
+    }
+    if duration is not None:
+        prediction_kwargs['duration'] = duration
+    pred = predictor.predict_adata(post_round1_adata, **prediction_kwargs)
     predicted_adata = _prediction_to_adata(pred, post_round1_adata)
     predicted_adata.obs['round'] = 2
     predicted_adata.obs['time_point'] = 'post_round2'
     predicted_adata.obs['round2_treatment'] = '+'.join(round2_treatment) if isinstance(round2_treatment, (list, tuple)) else str(round2_treatment)
     predicted_adata.obs['round2_components'] = [list(round2_treatment) if isinstance(round2_treatment, (list, tuple)) else [str(round2_treatment)]] * predicted_adata.n_obs
+    if duration is not None:
+        duration_values = list(duration) if isinstance(duration, (list, tuple)) else [float(duration)]
+        predicted_adata.obs['round2_durations_hours'] = [duration_values] * predicted_adata.n_obs
     pred['predicted_adata'] = predicted_adata
     return pred
 
@@ -63,6 +83,8 @@ def simulate_two_round_sequence(
     round2_treatment: Any,
     round1_dose: Any = None,
     round2_dose: Any = None,
+    round1_duration: Any = None,
+    round2_duration: Any = None,
     covariates: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if isinstance(model, dict):
@@ -77,6 +99,7 @@ def simulate_two_round_sequence(
         current_adata=current_adata,
         round1_treatment=round1_treatment,
         dose=round1_dose,
+        duration=round1_duration,
         covariates=covariates,
     )
     round2_covariates = dict(covariates or {})
@@ -87,6 +110,7 @@ def simulate_two_round_sequence(
         post_round1_adata_or_prediction=round1_prediction,
         round2_treatment=round2_treatment,
         dose=round2_dose,
+        duration=round2_duration,
         covariates=round2_covariates,
     )
     return {
@@ -97,6 +121,7 @@ def simulate_two_round_sequence(
         'z_total': round2_prediction['z_total'],
         'dose_scale': round2_prediction['dose_scale'],
         'component_dose_scale': round2_prediction.get('component_dose_scale'),
+        'component_duration_scale': round2_prediction.get('component_duration_scale'),
         'perturbation_embedding': round2_prediction['perturbation_embedding'],
         'predicted_adata': round2_prediction['predicted_adata'],
     }

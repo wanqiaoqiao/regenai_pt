@@ -13,6 +13,10 @@ MAX_EPOCHS="${MAX_EPOCHS:-120}"
 DEVICE="${DEVICE:-auto}"
 RANDOM_SEED="${RANDOM_SEED:-0}"
 CONTROL_TREATMENT="${CONTROL_TREATMENT:-control}"
+DE_LOSS_WEIGHT="${DE_LOSS_WEIGHT:-0.0}"
+DELTA_LOSS_WEIGHT="${DELTA_LOSS_WEIGHT:-0.0}"
+DELTA_CONTEXT_KEYS="${DELTA_CONTEXT_KEYS:-iPSC_line,round1_treatment}"
+DURATION_REGULARIZATION_WEIGHT="${DURATION_REGULARIZATION_WEIGHT:-0.1}"
 
 IPSC_TWIN="$ROOT_DIR/.venv/bin/ipsc-twin"
 if [[ ! -x "$IPSC_TWIN" ]]; then
@@ -50,6 +54,10 @@ Starting RegenAI-PT combined-round retraining
   warmup_epochs:           7
   ramp_epochs:             35
   max_adversarial_weight:  0.002225770634981146
+  de_loss_weight:          $DE_LOSS_WEIGHT
+  delta_loss_weight:       $DELTA_LOSS_WEIGHT
+  delta_context_keys:      $DELTA_CONTEXT_KEYS
+  duration_reg_weight:     $DURATION_REGULARIZATION_WEIGHT
 SETTINGS
 
 export PYTHONUNBUFFERED=1
@@ -78,6 +86,10 @@ export PYTHONUNBUFFERED=1
   --early-stopping-patience 15 \
   --gradient-clip-norm 5.0 \
   --n-de-genes 100 \
+  --de-loss-weight "$DE_LOSS_WEIGHT" \
+  --delta-loss-weight "$DELTA_LOSS_WEIGHT" \
+  --delta-context-keys "$DELTA_CONTEXT_KEYS" \
+  --duration-regularization-weight "$DURATION_REGULARIZATION_WEIGHT" \
   --cell-type-key time_point \
   --control-treatment "$CONTROL_TREATMENT" \
   --random-seed "$RANDOM_SEED" \

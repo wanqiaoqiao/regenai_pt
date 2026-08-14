@@ -14,6 +14,7 @@ This is not a clinical system. It does not make clinical claims, and it should b
 - `v0.6.0`: Adds expression-distribution and latent-disentanglement training metrics.
 - `v0.7.0`: Adds auditable cell-state and treatment-component latent-space visualizations.
 - `v0.8.0`: Adds perturbation-fidelity validation, Optuna hyperparameter tuning, and reproducible best-parameter retraining.
+- `v1.0.0`: Adds DE-weighted and population-delta training objectives, duration-aware multi-component perturbations, OOD transition evaluation, and inverse treatment recommendation artifacts.
 
 ## What This Program Covers
 
@@ -240,6 +241,31 @@ Each epoch also reports CPA-style diagnostics in the training-history CSV:
 - `covariate_adv_accuracy`: macro-average raw accuracy across all configured covariate adversaries.
 - `covariate_adv_accuracy_<key>`: raw adversary accuracy for each covariate, such as `iPSC_line`, `batch`, `round`, or `time_point`.
 
+Optional treatment-response losses are disabled by default for backward
+compatibility. `--de-loss-weight` adds reconstruction MSE over each
+treatment's top DE genes selected from the training split only.
+`--delta-loss-weight` matches the model's same-cell treated-versus-control
+counterfactual shift to the observed training-population shift. Controls are
+matched using `--delta-context-keys` (default:
+`iPSC_line,round1_treatment`) when those keys are available. Validation and
+held-out cells are never used to define DE genes or delta targets.
+
+For a conservative first experiment using the Optuna-selected architecture:
+
+```bash
+DE_LOSS_WEIGHT=0.5 \
+DELTA_LOSS_WEIGHT=1.0 \
+DELTA_CONTEXT_KEYS=iPSC_line,round1_treatment \
+./scripts/retrain_regenai_pt_optuna_best.sh \
+  outputs/regenai_pt_de05_delta10
+```
+
+The training-history CSV contains `train_de_reconstruction_loss`,
+`val_de_reconstruction_loss`, `train_delta_loss`, and `val_delta_loss` in
+addition to the existing loss components. Compare candidate weights using
+held-out training conditions; do not select them using the final OOD test
+condition.
+
 Covariate adversary accuracy is a leakage diagnostic: lower values near the
 chance or majority-class baseline indicate that less covariate information is
 recoverable from `z_basal`. It should not be interpreted as a metric to
@@ -300,8 +326,8 @@ In round-2 mode, `round1_treatment` can also be included as a context covariate 
 
 Each round can contain one or more treatment components. The canonical AnnData fields are:
 
-- `round1_components`, `round1_doses`, `round1_dose_units`
-- `round2_components`, `round2_doses`, `round2_dose_units`
+- `round1_components`, `round1_doses`, `round1_dose_units`, `round1_durations_hours`
+- `round2_components`, `round2_doses`, `round2_dose_units`, `round2_durations_hours`
 
 Each cell stores aligned lists, for example:
 
@@ -309,9 +335,40 @@ Each cell stores aligned lists, for example:
 adata.obs.at[cell_id, "round1_components"] = ["CHIR99021", "ActivinA"]
 adata.obs.at[cell_id, "round1_doses"] = [3.0, 100.0]
 adata.obs.at[cell_id, "round1_dose_units"] = ["uM", "ng/mL"]
+adata.obs.at[cell_id, "round1_durations_hours"] = [24.0, 48.0]
 ```
 
-Legacy `round1_treatment` / `round1_dose` and `round2_treatment` / `round2_dose` columns remain supported. A legacy treatment label is converted internally to a one-component treatment. Component effects are dose-scaled and summed; when enabled, the interaction MLP adds a learned pairwise effect.
+Duration values are per-component exposure times and must align with the component
+and dose lists. They are not automatically inferred from collection time because
+treatment may be pulsed, delayed, or washed out. Unknown durations should be
+stored as missing values rather than zero. RegenAI-PT carries a duration mask so
+legacy datasets without duration remain usable without interpreting missingness as
+zero exposure.
+
+Legacy `round1_treatment` / `round1_dose` and `round2_treatment` / `round2_dose` columns remain supported. A legacy treatment label is converted internally to a one-component treatment. Component effects are dose- and duration-scaled and summed; when enabled, the interaction MLP adds a learned pairwise effect.
+
+For component `j`, the first duration-aware implementation uses:
+
+```text
+effect_j = embedding_j * dose_scale_j(dose) * duration_scale_j(duration_hours)
+```
+
+Duration-response parameters are component-specific and regularized. If duration
+is missing, `duration_scale` is neutral (`1.0`). Duration-response curves are only
+scientifically identifiable when training data contain duration variation that is
+not completely confounded with treatment, line, or time point.
+
+Prediction accepts exposure duration explicitly:
+
+```bash
+ipsc-twin predict-transition \
+  --model-path outputs/regenai_pt/model.pt \
+  --adata data/current.h5ad \
+  --treatment D \
+  --dose 5 \
+  --duration-hours 504 \
+  --output-dir outputs/duration_prediction
+```
 
 Sequential simulations therefore support forms such as:
 

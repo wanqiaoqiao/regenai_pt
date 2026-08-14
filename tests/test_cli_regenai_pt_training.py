@@ -153,10 +153,13 @@ def test_cli_regenai_pt_training_and_registry_if_torch_available(tmp_path: Path)
     for split in ('train', 'val'):
         for component in (
             'reconstruction_loss',
+            'de_reconstruction_loss',
+            'delta_loss',
             'treatment_adv_loss',
             'covariate_adv_loss',
             'embedding_l2_loss',
             'dose_regularization_loss',
+            'duration_regularization_loss',
             'total_loss',
         ):
             assert f'{split}_{component}' in history.columns

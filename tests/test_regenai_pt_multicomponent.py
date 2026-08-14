@@ -51,12 +51,19 @@ def _make_multicomponent_adata(n_cells: int = 24) -> ad.AnnData:
                 'round1_components': round1_components,
                 'round1_doses': round1_doses,
                 'round1_dose_units': ['uM'] * len(round1_components),
+                'round1_durations_hours': [24.0] * len(round1_components),
                 'round2_components': round2_components,
                 'round2_doses': round2_doses,
                 'round2_dose_units': ['uM'] * len(round2_components),
+                'round2_durations_hours': [48.0] * len(round2_components),
                 'treatment_components': round1_components if round_value < 2 else round2_components,
                 'treatment_component_doses': round1_doses if round_value < 2 else round2_doses,
                 'treatment_component_dose_units': ['uM'] * len(round1_components if round_value < 2 else round2_components),
+                'treatment_component_durations_hours': (
+                    [24.0] * len(round1_components)
+                    if round_value < 2
+                    else [48.0] * len(round2_components)
+                ),
                 'iPSC_line': 'line1',
                 'batch': 'batch1',
                 'round': round_value,
@@ -78,6 +85,7 @@ def test_round_specific_preparation_keeps_multicomponent_fields() -> None:
     round2 = prepare_round_specific_adata(adata, round_number=2, config=config)
     assert 'treatment_components' in round2.obs.columns
     assert 'treatment_component_doses' in round2.obs.columns
+    assert 'treatment_component_durations_hours' in round2.obs.columns
     assert 'round1_treatment' in round2.obs.columns
     assert isinstance(round2.obs['treatment_components'].iloc[0], list)
 
@@ -91,9 +99,81 @@ def test_multicomponent_dataloader_outputs_component_tensors_if_torch_available(
     assert isinstance(batch['component_ids'], torch.Tensor)
     assert isinstance(batch['component_doses'], torch.Tensor)
     assert isinstance(batch['component_mask'], torch.Tensor)
+    assert isinstance(batch['component_durations'], torch.Tensor)
+    assert isinstance(batch['component_duration_mask'], torch.Tensor)
     assert batch['component_ids'].shape[1] == 3
     assert batch['component_mask'].shape == batch['component_doses'].shape
     assert float(batch['component_mask'].max().item()) == 1.0
+    assert float(batch['component_duration_mask'].max().item()) == 1.0
+
+
+def test_duration_changes_prediction_if_torch_available() -> None:
+    torch = pytest.importorskip('torch')
+    from ipsc_digital_twin.models.regenai_pt_model import RegenAIPTNet
+
+    torch.manual_seed(7)
+    model = RegenAIPTNet(
+        input_dim=6,
+        n_treatments=3,
+        n_components=3,
+        n_latent=4,
+        n_hidden=8,
+        n_layers=2,
+        dropout=0.0,
+        use_component_interactions=False,
+    )
+    model.component_duration_a.weight.data.fill_(1.0)
+    model.component_duration_b.weight.data.zero_()
+    x = torch.randn(2, 6)
+    ids = torch.tensor([[1], [1]], dtype=torch.long)
+    doses = torch.tensor([[1.0], [1.0]], dtype=torch.float32)
+    mask = torch.ones_like(doses)
+    known = torch.ones_like(doses)
+    short = model.predict(
+        x=x,
+        component_ids=ids,
+        component_doses=doses,
+        component_durations=torch.tensor([[1.0], [1.0]]),
+        component_duration_mask=known,
+        component_mask=mask,
+    )
+    long = model.predict(
+        x=x,
+        component_ids=ids,
+        component_doses=doses,
+        component_durations=torch.tensor([[168.0], [168.0]]),
+        component_duration_mask=known,
+        component_mask=mask,
+    )
+    assert not torch.allclose(short, long)
+
+
+def test_missing_duration_mask_is_neutral_if_torch_available() -> None:
+    torch = pytest.importorskip('torch')
+    from ipsc_digital_twin.models.regenai_pt_model import RegenAIPTNet
+
+    model = RegenAIPTNet(
+        input_dim=4,
+        n_treatments=2,
+        n_latent=3,
+        n_hidden=6,
+        dropout=0.0,
+    )
+    model.component_duration_a.weight.data.fill_(2.0)
+    x = torch.randn(2, 4)
+    ids = torch.tensor([[1], [1]])
+    doses = torch.ones((2, 1))
+    mask = torch.ones((2, 1))
+    pred_legacy = model.predict(x=x, component_ids=ids, component_doses=doses, component_mask=mask)
+    pred_masked = model.predict(
+        x=x,
+        component_ids=ids,
+        component_doses=doses,
+        component_durations=torch.tensor([[24.0], [168.0]]),
+        component_duration_mask=torch.zeros((2, 1)),
+        component_mask=mask,
+    )
+    assert torch.allclose(pred_legacy, pred_masked)
 
 
 def test_model_multicomponent_effect_differs_from_single_component_if_torch_available() -> None:
@@ -127,8 +207,10 @@ def test_sequence_a_plus_b_then_c_plus_d_supported_if_torch_available(tmp_path: 
         {
             'round1_components': ['A', 'B'],
             'round1_dose': [1.0, 2.0],
+            'round1_durations_hours': [24.0, 48.0],
             'round2_components': ['C', 'D'],
             'round2_dose': [1.5, 0.5],
+            'round2_durations_hours': [72.0, 72.0],
         },
     )
     assert 'predicted_state' in result
